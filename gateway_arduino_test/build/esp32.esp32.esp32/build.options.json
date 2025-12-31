@@ -1,0 +1,9 @@
+{
+  "additionalFiles": "",
+  "compiler.optimization_flags": "-Os",
+  "customBuildProperties": "",
+  "fqbn": "esp32:esp32:esp32",
+  "hardwareFolders": "C:\\Users\\edoar\\AppData\\Local\\Arduino15\\packages\\esp32\\hardware\\esp32\\3.3.5,C:\\Users\\edoar\\AppData\\Local\\Arduino15\\packages\\esp32\\hardware\\esp32\\3.3.5",
+  "otherLibrariesFolders": "C:\\Users\\edoar\\Documents\\Arduino\\libraries",
+  "sketchLocation": "C:\\Users\\edoar\\Desktop\\OmniaPi_HomeDomotic_Project\\gateway_arduino_test"
+}
