@@ -2,14 +2,27 @@
 
 Professional-grade firmware for the OmniaPi home automation system.
 
+> **Last Updated**: 02/01/2026
+> **Gateway Version**: v1.3.0 (Arduino)
+> **Node Version**: v2.0.0 (ESP-IDF)
+
 ## Overview
 
 OmniaPi is an open-source home automation system designed to control 230V loads safely and reliably. The system consists of:
 
-- **Gateway**: WT32-ETH01 (Ethernet + ESP-NOW master)
-- **Nodes**: ESP32-C3 SuperMini (ESP-NOW slave + relay control)
+- **Gateway**: WT32-ETH01 (Arduino framework + ESP-NOW master)
+- **Nodes**: ESP32-C3 SuperMini (**ESP-IDF framework** + ESP-NOW slave + relay control)
 
 Communication between gateway and nodes uses **ESP-NOW mesh**, providing low-latency, reliable communication without depending on WiFi infrastructure.
+
+### Important: Dual Framework Architecture
+
+| Component | Framework | Build Tool | Reason |
+|-----------|-----------|------------|--------|
+| **Gateway** | Arduino | Arduino CLI | Easy web server + OTA |
+| **Node** | **ESP-IDF** | idf.py | Reliable boot without USB |
+
+The Node was migrated from Arduino to ESP-IDF on 02/01/2026 to fix a critical boot issue where ESP32-C3 would not start without USB connected.
 
 ## Architecture
 
@@ -73,78 +86,107 @@ Communication between gateway and nodes uses **ESP-NOW mesh**, providing low-lat
 
 ```
 OmniaPi_HomeDomotic_Firmware/
-├── TODO.md                 # Development task list
-├── README.md               # This file
-├── gateway/                # Gateway firmware (WT32-ETH01)
-│   ├── platformio.ini
-│   ├── src/main.cpp
-│   └── data/               # Web UI files (SPIFFS)
-├── node/                   # Node firmware (ESP32-C3)
-│   ├── platformio.ini
-│   └── src/main.cpp
-├── shared/                 # Shared code
-│   ├── protocol/           # ESP-NOW message definitions
-│   ├── config/             # Hardware configuration
-│   └── security/           # Encryption (future)
-├── docs/                   # Documentation
-└── tools/                  # Build and flash scripts
+├── TODO.md                     # Development task list
+├── README.md                   # This file
+│
+├── gateway/                    # Gateway firmware (Arduino)
+│   ├── src/
+│   │   └── main.cpp            # Gateway firmware
+│   └── data/
+│       └── index.html          # Web UI (SPIFFS)
+│
+├── node/                       # Node firmware (ESP-IDF!)
+│   ├── CMakeLists.txt          # ESP-IDF project config
+│   ├── sdkconfig.defaults      # Default settings
+│   └── main/
+│       ├── CMakeLists.txt      # Component config
+│       ├── main.c              # Entry point
+│       ├── espnow_handler.c/h  # ESP-NOW communication
+│       ├── relay_control.c/h   # Relay GPIO control
+│       └── led_status.c/h      # LED status patterns
+│
+├── shared/                     # Shared code
+│   ├── protocol/
+│   │   └── messages.h          # ESP-NOW message definitions
+│   └── config/
+│       └── hardware.h          # Hardware configuration
+│
+└── docs/                       # Documentation
 ```
 
 ## Getting Started
 
 ### Prerequisites
 
-- [PlatformIO](https://platformio.org/) (recommended) or Arduino IDE
-- USB cable for programming
-- For WT32-ETH01: USB-TTL adapter (CH340 or similar)
+**Gateway (Arduino):**
+- [Arduino CLI](https://arduino.github.io/arduino-cli/) v1.1.3+
+- ESP32 Core 3.3.5
+- USB-TTL adapter (CH340 or similar) for WT32-ETH01
+
+**Node (ESP-IDF):**
+- [ESP-IDF](https://docs.espressif.com/projects/esp-idf/en/latest/esp32c3/get-started/) v5.5.2+
+- USB cable (ESP32-C3 has native USB)
 
 ### Building Gateway Firmware
 
 ```bash
+# Using Arduino CLI
 cd gateway
-pio run
-pio run -t upload
+arduino-cli compile --fqbn esp32:esp32:esp32 src/main.cpp
+arduino-cli upload -p COM6 --fqbn esp32:esp32:esp32 src/main.cpp
 ```
 
 ### Building Node Firmware
 
+**IMPORTANT**: Use ESP-IDF CMD prompt, NOT PowerShell or VS Code terminal!
+
 ```bash
+# First time setup
 cd node
-pio run
-pio run -t upload
+idf.py set-target esp32c3
+
+# Build and flash
+idf.py build
+idf.py -p COM8 flash
+
+# Monitor serial output (optional)
+idf.py -p COM8 monitor
 ```
 
 ### Important Settings
 
-**WT32-ETH01:**
+**WT32-ETH01 (Gateway):**
 - Flash Frequency: 40MHz
 - Flash Mode: DIO
 - Hold IO0 to GND before flashing
 
-**ESP32-C3 SuperMini:**
-- USB CDC On Boot: Enabled (required for serial output)
-- Flash Frequency: 40MHz
-- Flash Mode: DIO
+**ESP32-C3 SuperMini (Node):**
+- Framework: ESP-IDF (NOT Arduino!)
+- Target: esp32c3
+- The node boots independently of USB connection
 
 ## Features
 
-### Current (v0.1.0)
-- [x] Ethernet connectivity (Gateway)
-- [x] ESP-NOW initialization
-- [x] Basic Web API
+### Current (Gateway v1.3.0 + Node v2.0.0)
+- [x] Ethernet + WiFi connectivity (Gateway)
+- [x] ESP-NOW bidirectional communication
+- [x] Web UI with relay control
+- [x] REST API (`/api/status`, `/api/nodes`, `/api/command`)
 - [x] Relay control with inverted logic
-- [x] State persistence (NVS)
-- [x] Physical button support
+- [x] Node tracking with firmware version display
+- [x] Gateway OTA via Web UI
+- [x] Node OTA via ESP-NOW
+- [x] Fast heartbeat (3 seconds)
+- [x] Independent boot (Node works without USB)
 
 ### Planned
+- [ ] Physical button support on Node
 - [ ] Auto-discovery and pairing
-- [ ] Full ESP-NOW mesh communication
-- [ ] Heartbeat monitoring
-- [ ] OTA updates
-- [ ] AES encryption
+- [ ] NVS state persistence on Node
+- [ ] AES encryption for ESP-NOW
+- [ ] MQTT cloud integration
 - [ ] Dimmer support
 - [ ] Sensor integration
-- [ ] Backend API integration
 
 ## Safety
 

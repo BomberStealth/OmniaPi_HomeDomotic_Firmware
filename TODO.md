@@ -3,17 +3,32 @@
 > Questo file documenta il piano completo per lo sviluppo del firmware OmniaPi.
 > Repository: `OmniaPi_HomeDomotic_Firmware`
 > Data creazione: 29/12/2025
-> **Ultimo aggiornamento: 30/12/2025**
+> **Ultimo aggiornamento: 02/01/2026**
 
 ---
 
-## ✅ STATO ATTUALE (30/12/2025)
+## ⚠️ AGGIORNAMENTO CRITICO (02/01/2026)
+
+### Problema Risolto Definitivamente
+**ESP32-C3 non bootava senza USB collegato al PC**
+- **Causa**: Arduino framework ha dipendenze USB che bloccano il boot
+- **Soluzione**: Migrato Node da Arduino a **ESP-IDF puro**
+
+### Nuova Architettura Firmware
+| Componente | Framework | Build Tool |
+|------------|-----------|------------|
+| **Gateway** (WT32-ETH01) | Arduino | Arduino CLI (invariato) |
+| **Node** (ESP32-C3) | **ESP-IDF 5.5.2** | **idf.py** |
+
+---
+
+## ✅ STATO ATTUALE (02/01/2026)
 
 ### Firmware Funzionanti
-| Componente | Versione | File | Stato |
-|------------|----------|------|-------|
-| **Gateway** | v1.3.0 | `gateway_arduino_test.ino` | ✅ Funzionante + Controllo Relè |
-| **Node** | v1.5.0 | `node_arduino_test.ino` | ✅ Funzionante (senza USB!) |
+| Componente | Versione | Framework | Stato |
+|------------|----------|-----------|-------|
+| **Gateway** | v1.3.0 | Arduino | ✅ Funzionante + Controllo Relè |
+| **Node** | **v2.0.0** | **ESP-IDF** | ✅ Funzionante (boot indipendente da USB!) |
 
 ### Funzionalità Implementate
 - ✅ **ESP-NOW Bidirezionale** - Gateway ↔ Node comunicano perfettamente
@@ -24,28 +39,37 @@
 - ✅ **LittleFS per Node FW** - Firmware Node salvato su flash (non RAM)
 - ✅ **Controllo Relè via Web UI** - Pulsanti ON/OFF per ogni canale relè
 - ✅ **API REST /api/command** - Endpoint per controllo relè programmatico
+- ✅ **Boot Indipendente** - Node funziona senza USB collegato (ESP-IDF)
 
 ### Sistema di Build
-```
-⚠️ IMPORTANTE: Si usa Arduino CLI, NON PlatformIO!
-```
+
+#### Gateway (Arduino CLI)
 | Impostazione | Valore |
 |--------------|--------|
 | Build Tool | Arduino CLI v1.1.3 |
 | ESP32 Core | 3.3.5 (ESP-IDF 5.5) |
 | Path Arduino CLI | `C:/Users/edoar/arduino-cli/arduino-cli.exe` |
-| Board Gateway | `esp32:esp32:esp32` |
-| Board Node | `esp32:esp32:esp32c3` |
+| Board | `esp32:esp32:esp32` |
+
+#### Node (ESP-IDF)
+| Impostazione | Valore |
+|--------------|--------|
+| Build Tool | **idf.py (ESP-IDF 5.5.2)** |
+| Target | esp32c3 |
+| Path | `node/` |
 
 ### Comandi Build
 ```bash
-# Gateway
+# Gateway (Arduino CLI - invariato)
 arduino-cli compile --fqbn esp32:esp32:esp32 gateway_arduino_test.ino
 arduino-cli upload -p COM6 --fqbn esp32:esp32:esp32 gateway_arduino_test.ino
 
-# Node
-arduino-cli compile --fqbn esp32:esp32:esp32c3 node_arduino_test.ino
-arduino-cli upload -p COM8 --fqbn esp32:esp32:esp32c3 node_arduino_test.ino
+# Node (ESP-IDF - NUOVO!)
+# IMPORTANTE: Usare ESP-IDF CMD, NON PowerShell/VS Code terminal!
+cd C:\Users\edoar\Desktop\Omnia_HomeDomotic\OmniaPi_HomeDomotic_Firmware\node
+idf.py set-target esp32c3
+idf.py build
+idf.py -p COM8 flash
 ```
 
 ---
@@ -110,15 +134,16 @@ arduino-cli upload -p COM8 --fqbn esp32:esp32:esp32c3 node_arduino_test.ino
 ### Nodi: ESP32-C3 SuperMini (TECNOIOT Amazon)
 | Impostazione | Valore |
 |--------------|--------|
-| Board | `esp32:esp32:esp32c3` |
-| Flash Frequency | 40MHz |
-| Flash Mode | DIO |
-| USB CDC On Boot | **ENABLED** (importante!) |
+| Framework | **ESP-IDF 5.5.2** (NON Arduino!) |
+| Target | esp32c3 |
 | Porta Seriale | COM8 |
 | WiFi Channel | 10 (deve matchare Gateway) |
-| Firmware attuale | **v1.5.0** |
-| GPIO Relè 1 | GPIO1 |
-| GPIO Relè 2 | GPIO2 |
+| Firmware attuale | **v2.0.0** |
+| Gateway MAC | `E8:9F:6D:BB:F8:F8` |
+| Node ID | 0x02 |
+| GPIO Relè 1 | GPIO1 (active-low) |
+| GPIO Relè 2 | GPIO2 (active-low) |
+| GPIO LED | GPIO8 (active-low) |
 | GPIO da evitare | GPIO0 (boot pin) |
 
 ### Alimentazione: HLK-PM01
@@ -135,56 +160,40 @@ arduino-cli upload -p COM8 --fqbn esp32:esp32:esp32c3 node_arduino_test.ino
 
 ```
 OmniaPi_HomeDomotic_Firmware/
-├── TODO.md                    ← Task list (questo file copiato)
+├── TODO.md                    ← Task list (questo file)
 ├── README.md                  ← Documentazione progetto
 ├── LICENSE                    ← Licenza (da definire)
 │
-├── gateway/                   ← Firmware WT32-ETH01
-│   ├── platformio.ini
+├── gateway/                   ← Firmware WT32-ETH01 (Arduino)
 │   ├── src/
-│   │   ├── main.cpp
-│   │   ├── config.h
-│   │   ├── ethernet.cpp/.h
-│   │   ├── espnow_master.cpp/.h
-│   │   ├── webserver.cpp/.h
-│   │   ├── storage.cpp/.h
-│   │   └── ota.cpp/.h
-│   ├── include/
-│   ├── lib/
-│   └── data/                  ← Web UI files (SPIFFS)
+│   │   └── main.cpp           ← Firmware Gateway completo
+│   └── data/
+│       └── index.html         ← Web UI (SPIFFS)
 │
-├── node/                      ← Firmware ESP32-C3
-│   ├── platformio.ini
-│   ├── src/
-│   │   ├── main.cpp
-│   │   ├── config.h
-│   │   ├── espnow_slave.cpp/.h
-│   │   ├── relay.cpp/.h
-│   │   ├── button.cpp/.h
-│   │   ├── led.cpp/.h
-│   │   └── storage.cpp/.h
-│   ├── include/
-│   └── lib/
+├── node/                      ← Firmware ESP32-C3 (ESP-IDF!)
+│   ├── CMakeLists.txt         ← ESP-IDF project config
+│   ├── sdkconfig.defaults     ← Default ESP-IDF settings
+│   └── main/
+│       ├── CMakeLists.txt     ← Component config
+│       ├── main.c             ← Entry point
+│       ├── espnow_handler.c/.h ← ESP-NOW communication
+│       ├── relay_control.c/.h  ← Relay GPIO control
+│       └── led_status.c/.h     ← LED status patterns
 │
 ├── shared/                    ← Codice condiviso
 │   ├── protocol/
-│   │   ├── messages.h         ← Definizioni messaggi ESP-NOW
-│   │   └── commands.h         ← Comandi supportati
-│   ├── security/
-│   │   └── encryption.h       ← AES per ESP-NOW
+│   │   └── messages.h         ← Definizioni messaggi ESP-NOW
 │   └── config/
 │       └── hardware.h         ← Pin definitions
 │
-├── docs/
+├── docs/                      ← Documentazione (da creare)
 │   ├── hardware.md            ← Schema collegamenti
 │   ├── protocol.md            ← Specifiche protocollo
-│   ├── production.md          ← Guida produzione
 │   └── troubleshooting.md     ← Problemi comuni
 │
-└── tools/
+└── tools/                     ← Script (da creare)
     ├── flash_gateway.sh       ← Script flash gateway
-    ├── flash_node.sh          ← Script flash nodo
-    └── test_mesh.py           ← Test comunicazione
+    └── flash_node.sh          ← Script flash nodo
 ```
 
 ---
@@ -194,9 +203,9 @@ OmniaPi_HomeDomotic_Firmware/
 ### ✅ MILESTONE 1: Setup Repository e Struttura Base (COMPLETATA)
 - [x] Creare repository `OmniaPi_HomeDomotic_Firmware`
 - [x] Inizializzare struttura cartelle (gateway/, node/, shared/)
-- [x] ~~Configurare PlatformIO~~ → Usato Arduino CLI invece
+- [x] ~~Configurare PlatformIO~~ → Gateway: Arduino CLI, Node: ESP-IDF
 - [x] Creare shared/protocol/messages.h con strutture base
-- [ ] Creare README.md con overview progetto
+- [x] Creare README.md con overview progetto
 
 ### ✅ MILESTONE 2: Gateway - WiFi e Web Server (COMPLETATA)
 - [x] Implementare connessione WiFi (WIFI_AP_STA mode)
@@ -340,9 +349,9 @@ data[5..N] = firmware_data; // Max 200 bytes
 ```
 
 ### ESP-IDF 5.5 Callback Signatures
-```cpp
-// IMPORTANTE: Queste sono le signature corrette per ESP32 Core 3.3.5
 
+#### Gateway (Arduino con ESP32 Core 3.3.5)
+```cpp
 // Receive callback
 void OnDataRecv(const esp_now_recv_info_t *info,
                 const uint8_t *data, int len);
@@ -350,6 +359,28 @@ void OnDataRecv(const esp_now_recv_info_t *info,
 // Send callback
 void OnDataSent(const wifi_tx_info_t *tx_info,
                 esp_now_send_status_t status);
+```
+
+#### Node (ESP-IDF puro 5.5.2)
+```c
+// Receive callback
+static void espnow_recv_cb(const esp_now_recv_info_t *recv_info,
+                           const uint8_t *data, int len);
+
+// Send callback
+static void espnow_send_cb(const uint8_t *mac_addr,
+                           esp_now_send_status_t status);
+```
+
+### Protocollo Semplificato Node ESP-IDF
+```c
+// Ricezione dal Gateway:
+// - Heartbeat: 1 byte [0x01]
+// - Command:   3 byte [0x20][channel][action]
+
+// Invio al Gateway:
+// - Heartbeat ACK: [0x02][node_id][version...]
+// - Command ACK:   [0x21][channel][state]
 ```
 
 ### Tipi Messaggio (Implementati v1.3.0)
@@ -460,16 +491,12 @@ ATTENZIONE: Logica relè INVERTITA!
    - Le callback ESP-NOW hanno signature diverse in ESP-IDF 5.5
    - Soluzione: Usare Arduino CLI con ESP32 Core 3.3.5
 
-8. **ESP32-C3 non funziona senza USB al PC** (RISOLTO 30/12/2025)
-   - Causa: `Serial.begin()` e `Serial.print()` bloccano il boot quando USB non è connesso
-   - Sintomo: Node funziona con USB al PC, va offline con alimentazione esterna
-   - Soluzione: Rimuovere TUTTO il codice Serial dal firmware Node
-   ```cpp
-   // NON USARE:
-   // Serial.begin(115200);
-   // Serial.println("...");
-   ```
-   - Versione fix: Node v1.5.0
+8. **ESP32-C3 non funziona senza USB al PC** (RISOLTO DEFINITIVAMENTE 02/01/2026)
+   - Causa ORIGINALE (v1.5.0): `Serial.begin()` bloccava il boot
+   - Causa REALE: Arduino framework ha dipendenze USB nascoste
+   - **Soluzione DEFINITIVA**: Migrato Node a **ESP-IDF puro**
+   - Versione fix: **Node v2.0.0 (ESP-IDF)**
+   - Il Node ora boota sempre, con o senza USB collegato
 
 ---
 
@@ -488,10 +515,11 @@ ATTENZIONE: Logica relè INVERTITA!
 ### Node
 | Versione | Data | Note |
 |----------|------|------|
-| 1.0.0 | 29/12/2025 | ESP-NOW slave base |
-| 1.1.0 | 30/12/2025 | OTA receiver |
-| 1.2.0 | 30/12/2025 | Fix zero-init response array |
-| 1.5.0 | 30/12/2025 | **FIX: Rimosso Serial per funzionare senza USB** |
+| 1.0.0 | 29/12/2025 | ESP-NOW slave base (Arduino) |
+| 1.1.0 | 30/12/2025 | OTA receiver (Arduino) |
+| 1.2.0 | 30/12/2025 | Fix zero-init response array (Arduino) |
+| 1.5.0 | 30/12/2025 | FIX: Rimosso Serial (Arduino - parziale) |
+| **2.0.0** | **02/01/2026** | **MIGRAZIONE ESP-IDF - Boot senza USB!** |
 
 ---
 
@@ -571,12 +599,22 @@ ATTENZIONE: Logica relè INVERTITA!
 
 | File | Descrizione |
 |------|-------------|
-| `gateway_arduino_test/gateway_arduino_test.ino` | Firmware Gateway completo |
-| `node_arduino_test/node_arduino_test.ino` | Firmware Node completo |
-| `OmniaPi_HomeDomotic_Firmware/gateway/` | Versione PlatformIO (non usata) |
-| `OmniaPi_HomeDomotic_Firmware/node/` | Versione PlatformIO (non usata) |
+| `gateway/src/main.cpp` | Firmware Gateway (Arduino) |
+| `gateway/data/index.html` | Web UI Gateway |
+| `node/main/main.c` | Entry point Node (ESP-IDF) |
+| `node/main/espnow_handler.c` | ESP-NOW communication Node |
+| `node/main/relay_control.c` | Relay GPIO control Node |
+| `node/main/led_status.c` | LED status patterns Node |
+| `shared/protocol/messages.h` | Definizioni messaggi ESP-NOW |
+| `shared/config/hardware.h` | Pin definitions |
+
+### File Legacy (non più usati)
+| File | Note |
+|------|------|
+| `gateway_arduino_test/` | Sostituito da `gateway/` |
+| `node_arduino_test/` | **Sostituito da ESP-IDF `node/`** |
 
 ---
 
 *Documento creato: 29/12/2025*
-*Ultimo aggiornamento: 30/12/2025*
+*Ultimo aggiornamento: 02/01/2026*
