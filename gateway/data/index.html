@@ -5,12 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OmniaPi Gateway</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
@@ -18,17 +13,8 @@
             color: #fff;
             padding: 20px;
         }
-
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-        }
-
-        header {
-            text-align: center;
-            margin-bottom: 30px;
-        }
-
+        .container { max-width: 900px; margin: 0 auto; }
+        header { text-align: center; margin-bottom: 30px; }
         h1 {
             font-size: 2rem;
             margin-bottom: 5px;
@@ -36,147 +22,152 @@
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
-
-        .subtitle {
-            color: rgba(255, 255, 255, 0.5);
-            font-size: 0.9rem;
-        }
-
+        .subtitle { color: rgba(255,255,255,0.5); font-size: 0.9rem; }
+        .version { color: rgba(255,255,255,0.3); font-size: 0.75rem; margin-top: 5px; }
         .card {
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
             border-radius: 16px;
             padding: 20px;
             margin-bottom: 20px;
         }
-
         .card h2 {
             font-size: 1rem;
-            color: rgba(255, 255, 255, 0.7);
+            color: rgba(255,255,255,0.7);
             margin-bottom: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
-
         .status-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
             gap: 15px;
         }
-
         .status-item {
-            background: rgba(255, 255, 255, 0.03);
+            background: rgba(255,255,255,0.03);
             border-radius: 12px;
             padding: 15px;
             text-align: center;
         }
+        .status-value { font-size: 1.3rem; font-weight: 700; color: #6ad4a0; }
+        .status-label { font-size: 0.75rem; color: rgba(255,255,255,0.5); margin-top: 5px; }
+        .online { color: #6ad4a0; }
+        .offline { color: #ef4444; }
 
-        .status-value {
-            font-size: 1.5rem;
-            font-weight: 700;
-            color: #6ad4a0;
-        }
-
-        .status-label {
-            font-size: 0.8rem;
-            color: rgba(255, 255, 255, 0.5);
-            margin-top: 5px;
-        }
-
-        .nodes-list {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-
-        .node-item {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            background: rgba(255, 255, 255, 0.03);
+        /* Nodes */
+        .nodes-list { display: flex; flex-direction: column; gap: 12px; }
+        .node-card {
+            background: rgba(255,255,255,0.03);
             border-radius: 12px;
             padding: 15px;
         }
-
+        .node-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .node-mac { font-family: monospace; font-size: 0.9rem; color: #6ad4a0; }
+        .node-status {
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .node-online { background: rgba(106,212,160,0.2); color: #6ad4a0; }
+        .node-offline { background: rgba(239,68,68,0.2); color: #ef4444; }
         .node-info {
             display: flex;
-            align-items: center;
-            gap: 15px;
+            gap: 20px;
+            font-size: 0.8rem;
+            color: rgba(255,255,255,0.5);
+            margin-bottom: 12px;
         }
-
-        .node-icon {
-            width: 40px;
-            height: 40px;
-            background: rgba(106, 212, 160, 0.2);
-            border-radius: 10px;
+        .relay-row {
             display: flex;
             align-items: center;
-            justify-content: center;
-            font-size: 1.2rem;
-        }
-
-        .node-name {
-            font-weight: 600;
-        }
-
-        .node-mac {
-            font-size: 0.75rem;
-            color: rgba(255, 255, 255, 0.4);
-        }
-
-        .node-controls {
-            display: flex;
             gap: 10px;
+            padding: 8px 0;
+            border-top: 1px solid rgba(255,255,255,0.05);
         }
+        .relay-label { font-size: 0.85rem; color: rgba(255,255,255,0.6); min-width: 60px; }
+        .relay-state {
+            padding: 3px 10px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            min-width: 40px;
+            text-align: center;
+        }
+        .relay-on { background: rgba(106,212,160,0.3); color: #6ad4a0; }
+        .relay-off { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.5); }
 
+        /* Buttons */
         .btn {
-            padding: 8px 16px;
+            padding: 6px 14px;
             border: none;
-            border-radius: 8px;
+            border-radius: 6px;
             cursor: pointer;
             font-weight: 600;
+            font-size: 0.8rem;
             transition: all 0.2s;
         }
-
-        .btn-on {
-            background: #6ad4a0;
-            color: #1a1a2e;
+        .btn:hover { transform: scale(1.05); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .btn-on { background: #6ad4a0; color: #1a1a2e; }
+        .btn-off { background: rgba(255,255,255,0.15); color: #fff; }
+        .btn-sm { padding: 4px 10px; font-size: 0.75rem; }
+        .btn-refresh {
+            background: transparent;
+            border: 1px solid rgba(255,255,255,0.2);
+            color: rgba(255,255,255,0.6);
+            padding: 4px 12px;
+            font-size: 0.75rem;
         }
 
-        .btn-off {
-            background: rgba(255, 255, 255, 0.1);
+        /* OTA */
+        .ota-section { margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.1); }
+        .ota-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+        .ota-label { font-size: 0.85rem; color: rgba(255,255,255,0.6); min-width: 120px; }
+        input[type="file"] { display: none; }
+        .file-btn {
+            background: rgba(255,255,255,0.1);
             color: #fff;
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.85rem;
         }
-
-        .btn:hover {
-            transform: scale(1.05);
+        .file-btn:hover { background: rgba(255,255,255,0.15); }
+        .progress {
+            height: 6px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 3px;
+            overflow: hidden;
+            flex: 1;
+            display: none;
         }
-
-        .empty-state {
-            text-align: center;
-            padding: 40px;
-            color: rgba(255, 255, 255, 0.4);
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #6ad4a0, #4aa870);
+            width: 0%;
+            transition: width 0.3s;
         }
+        .msg { padding: 8px 12px; border-radius: 6px; font-size: 0.85rem; margin-top: 10px; }
+        .msg-success { background: rgba(106,212,160,0.2); color: #6ad4a0; }
+        .msg-error { background: rgba(239,68,68,0.2); color: #ef4444; }
 
+        .empty-state { text-align: center; padding: 40px; color: rgba(255,255,255,0.4); }
         .discover-btn {
             background: linear-gradient(90deg, #6ad4a0, #4aa870);
             color: #1a1a2e;
-            padding: 12px 24px;
+            padding: 10px 20px;
             border: none;
-            border-radius: 12px;
+            border-radius: 10px;
             font-weight: 700;
             cursor: pointer;
             margin-top: 15px;
-        }
-
-        .discover-btn:hover {
-            transform: scale(1.02);
-        }
-
-        .online {
-            color: #6ad4a0;
-        }
-
-        .offline {
-            color: #ef4444;
         }
     </style>
 </head>
@@ -184,33 +175,45 @@
     <div class="container">
         <header>
             <h1>OmniaPi Gateway</h1>
-            <p class="subtitle">Local Home Automation Control</p>
+            <p class="subtitle">ESP-IDF Home Automation Control</p>
+            <p class="version" id="version">v--</p>
         </header>
 
         <div class="card">
             <h2>Gateway Status</h2>
-            <div class="status-grid" id="status-grid">
+            <div class="status-grid">
                 <div class="status-item">
-                    <div class="status-value" id="status-connection">--</div>
-                    <div class="status-label">Connection</div>
+                    <div class="status-value" id="s-conn">--</div>
+                    <div class="status-label">WiFi</div>
                 </div>
                 <div class="status-item">
-                    <div class="status-value" id="status-ip">--</div>
+                    <div class="status-value" id="s-mqtt">--</div>
+                    <div class="status-label">MQTT</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-value" id="s-ip">--</div>
                     <div class="status-label">IP Address</div>
                 </div>
                 <div class="status-item">
-                    <div class="status-value" id="status-nodes">0</div>
+                    <div class="status-value" id="s-nodes">0</div>
                     <div class="status-label">Nodes</div>
                 </div>
                 <div class="status-item">
-                    <div class="status-value" id="status-uptime">--</div>
+                    <div class="status-value" id="s-rx">0</div>
+                    <div class="status-label">RX Msgs</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-value" id="s-uptime">--</div>
                     <div class="status-label">Uptime</div>
                 </div>
             </div>
         </div>
 
         <div class="card">
-            <h2>Connected Nodes</h2>
+            <h2>
+                Connected Nodes
+                <button class="btn btn-refresh" onclick="fetchNodes()">Refresh</button>
+            </h2>
             <div class="nodes-list" id="nodes-list">
                 <div class="empty-state">
                     <p>No nodes discovered yet</p>
@@ -218,94 +221,155 @@
                 </div>
             </div>
         </div>
+
+        <div class="card">
+            <h2>Firmware Update</h2>
+            <div class="ota-row">
+                <span class="ota-label">Gateway OTA:</span>
+                <label class="file-btn" for="gw-file">Select .bin</label>
+                <input type="file" id="gw-file" accept=".bin" onchange="handleGwFile(this)">
+                <span id="gw-name">No file</span>
+                <button class="btn btn-on btn-sm" id="gw-upload" onclick="uploadGw()" disabled>Upload</button>
+            </div>
+            <div class="progress" id="gw-progress"><div class="progress-bar" id="gw-bar"></div></div>
+            <div id="gw-msg"></div>
+        </div>
     </div>
 
     <script>
+        let gwFile = null;
+
         async function fetchStatus() {
             try {
-                const response = await fetch('/api/status');
-                const data = await response.json();
+                const r = await fetch('/api/status');
+                const d = await r.json();
 
-                document.getElementById('status-connection').textContent = data.connected ? 'Online' : 'Offline';
-                document.getElementById('status-connection').className = 'status-value ' + (data.connected ? 'online' : 'offline');
-                document.getElementById('status-ip').textContent = data.ip || '--';
-                document.getElementById('status-nodes').textContent = data.nodeCount || 0;
+                document.getElementById('s-conn').textContent = d.connected ? 'OK' : 'DISC';
+                document.getElementById('s-conn').className = 'status-value ' + (d.connected ? 'online' : 'offline');
+                document.getElementById('s-mqtt').textContent = d.mqttConnected ? 'OK' : 'DISC';
+                document.getElementById('s-mqtt').className = 'status-value ' + (d.mqttConnected ? 'online' : 'offline');
+                document.getElementById('s-ip').textContent = d.ip || '--';
+                document.getElementById('s-nodes').textContent = d.nodeCount || 0;
+                document.getElementById('s-rx').textContent = d.received || 0;
+                document.getElementById('version').textContent = 'v' + (d.version || '--');
 
-                const uptime = data.uptime || 0;
-                const hours = Math.floor(uptime / 3600);
-                const minutes = Math.floor((uptime % 3600) / 60);
-                document.getElementById('status-uptime').textContent = `${hours}h ${minutes}m`;
-            } catch (error) {
-                console.error('Failed to fetch status:', error);
+                const up = d.uptime || 0;
+                const h = Math.floor(up / 3600);
+                const m = Math.floor((up % 3600) / 60);
+                document.getElementById('s-uptime').textContent = h + 'h ' + m + 'm';
+            } catch (e) {
+                console.error('Status error:', e);
             }
         }
 
         async function fetchNodes() {
             try {
-                const response = await fetch('/api/nodes');
-                const nodes = await response.json();
-
+                const r = await fetch('/api/nodes');
+                const d = await r.json();
+                const nodes = d.nodes || [];
                 const container = document.getElementById('nodes-list');
 
                 if (nodes.length === 0) {
-                    container.innerHTML = `
-                        <div class="empty-state">
-                            <p>No nodes discovered yet</p>
-                            <button class="discover-btn" onclick="discover()">Discover Nodes</button>
-                        </div>
-                    `;
+                    container.innerHTML = '<div class="empty-state"><p>No nodes discovered yet</p><button class="discover-btn" onclick="discover()">Discover Nodes</button></div>';
                     return;
                 }
 
-                container.innerHTML = nodes.map(node => `
-                    <div class="node-item">
+                container.innerHTML = nodes.map(n => {
+                    const relays = n.relays || [0, 0];
+                    return `
+                    <div class="node-card">
+                        <div class="node-header">
+                            <span class="node-mac">${n.mac}</span>
+                            <span class="node-status ${n.online ? 'node-online' : 'node-offline'}">${n.online ? 'Online' : 'Offline'}</span>
+                        </div>
                         <div class="node-info">
-                            <div class="node-icon">💡</div>
-                            <div>
-                                <div class="node-name">${node.name || 'Node ' + node.id}</div>
-                                <div class="node-mac">${node.mac} • RSSI: ${node.rssi}dBm</div>
-                            </div>
+                            <span>RSSI: ${n.rssi} dBm</span>
+                            <span>Ver: ${n.version || '?'}</span>
+                            <span>${n.lastSeen || ''}</span>
                         </div>
-                        <div class="node-controls">
-                            <button class="btn btn-on" onclick="sendCommand(${node.id}, 1, 1)">ON</button>
-                            <button class="btn btn-off" onclick="sendCommand(${node.id}, 1, 0)">OFF</button>
+                        <div class="relay-row">
+                            <span class="relay-label">Relay 1</span>
+                            <span class="relay-state ${relays[0] ? 'relay-on' : 'relay-off'}">${relays[0] ? 'ON' : 'OFF'}</span>
+                            <button class="btn btn-on btn-sm" onclick="cmd('${n.mac}',1,'on')" ${!n.online ? 'disabled' : ''}>ON</button>
+                            <button class="btn btn-off btn-sm" onclick="cmd('${n.mac}',1,'off')" ${!n.online ? 'disabled' : ''}>OFF</button>
                         </div>
-                    </div>
-                `).join('');
-            } catch (error) {
-                console.error('Failed to fetch nodes:', error);
+                        <div class="relay-row">
+                            <span class="relay-label">Relay 2</span>
+                            <span class="relay-state ${relays[1] ? 'relay-on' : 'relay-off'}">${relays[1] ? 'ON' : 'OFF'}</span>
+                            <button class="btn btn-on btn-sm" onclick="cmd('${n.mac}',2,'on')" ${!n.online ? 'disabled' : ''}>ON</button>
+                            <button class="btn btn-off btn-sm" onclick="cmd('${n.mac}',2,'off')" ${!n.online ? 'disabled' : ''}>OFF</button>
+                        </div>
+                    </div>`;
+                }).join('');
+            } catch (e) {
+                console.error('Nodes error:', e);
             }
         }
 
-        async function sendCommand(nodeId, channel, action) {
+        async function cmd(mac, channel, action) {
             try {
                 await fetch('/api/command', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ nodeId, channel, action })
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({mac, channel, action})
                 });
-                fetchNodes();
-            } catch (error) {
-                console.error('Failed to send command:', error);
+                setTimeout(fetchNodes, 300);
+            } catch (e) {
+                console.error('Command error:', e);
             }
         }
 
         async function discover() {
             try {
-                await fetch('/api/discover', { method: 'POST' });
+                await fetch('/api/discover', {method: 'POST'});
                 setTimeout(fetchNodes, 2000);
-            } catch (error) {
-                console.error('Failed to trigger discovery:', error);
+            } catch (e) {
+                console.error('Discover error:', e);
             }
+        }
+
+        function handleGwFile(input) {
+            if (input.files[0] && input.files[0].name.endsWith('.bin')) {
+                gwFile = input.files[0];
+                document.getElementById('gw-name').textContent = gwFile.name + ' (' + (gwFile.size/1024).toFixed(1) + ' KB)';
+                document.getElementById('gw-upload').disabled = false;
+            }
+        }
+
+        function uploadGw() {
+            if (!gwFile) return;
+            const formData = new FormData();
+            formData.append('firmware', gwFile);
+
+            document.getElementById('gw-progress').style.display = 'block';
+            const xhr = new XMLHttpRequest();
+            xhr.upload.onprogress = e => {
+                if (e.lengthComputable) {
+                    document.getElementById('gw-bar').style.width = (e.loaded/e.total*100) + '%';
+                }
+            };
+            xhr.onload = () => {
+                if (xhr.status === 200) {
+                    document.getElementById('gw-msg').innerHTML = '<div class="msg msg-success">Update OK! Rebooting...</div>';
+                    setTimeout(() => location.reload(), 5000);
+                } else {
+                    document.getElementById('gw-msg').innerHTML = '<div class="msg msg-error">Update failed</div>';
+                }
+            };
+            xhr.onerror = () => {
+                document.getElementById('gw-msg').innerHTML = '<div class="msg msg-error">Upload error</div>';
+            };
+            xhr.open('POST', '/update');
+            xhr.send(formData);
         }
 
         // Initial fetch
         fetchStatus();
         fetchNodes();
 
-        // Refresh every 5 seconds
+        // Auto-refresh
         setInterval(fetchStatus, 5000);
-        setInterval(fetchNodes, 10000);
+        setInterval(fetchNodes, 3000);
     </script>
 </body>
 </html>
