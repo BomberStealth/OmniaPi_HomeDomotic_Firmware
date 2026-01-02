@@ -1,7 +1,18 @@
-# PlatformIO
+# PlatformIO (legacy)
 .pio/
 .pioenvs/
 .piolibdeps/
+platformio.ini
+
+# ESP-IDF
+build/
+sdkconfig
+sdkconfig.old
+dependencies.lock
+
+# Arduino
+*.ino.bin
+*.ino.elf
 
 # IDE
 .vscode/.browse.c_cpp.db*
@@ -52,3 +63,5 @@ Thumbs.db
 # Temporary files
 tmp/
 temp/
+nul
+*.tmp
