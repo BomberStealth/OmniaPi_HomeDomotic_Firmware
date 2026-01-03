@@ -68,3 +68,13 @@ nul
 
 # Claude Code
 .claude/settings.local.json
+
+# Local build scripts
+build_*.bat
+build_*.cmd
+build_*.ps1
+flash_*.bat
+run_*.py
+do_build.bat
+fullbuild.bat
+get_shortcut.ps1
