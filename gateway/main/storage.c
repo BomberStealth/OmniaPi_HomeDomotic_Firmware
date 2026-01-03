@@ -133,3 +133,45 @@ int storage_get_file_size(const char *path)
 
     return (int)st.st_size;
 }
+
+void *storage_open_write(const char *path)
+{
+    if (path == NULL) return NULL;
+
+    char full_path[64];
+    snprintf(full_path, sizeof(full_path), "%s%s", STORAGE_BASE_PATH, path);
+
+    FILE *f = fopen(full_path, "wb");
+    if (f == NULL) {
+        ESP_LOGE(TAG, "Failed to create file: %s", full_path);
+        return NULL;
+    }
+
+    ESP_LOGI(TAG, "Opened for streaming write: %s", full_path);
+    return (void *)f;
+}
+
+esp_err_t storage_write_chunk(void *handle, const uint8_t *data, size_t len)
+{
+    if (handle == NULL || data == NULL) return ESP_ERR_INVALID_ARG;
+
+    FILE *f = (FILE *)handle;
+    size_t written = fwrite(data, 1, len, f);
+
+    if (written != len) {
+        ESP_LOGE(TAG, "Write chunk failed: %d/%d", written, len);
+        return ESP_FAIL;
+    }
+
+    return ESP_OK;
+}
+
+esp_err_t storage_close_write(void *handle)
+{
+    if (handle == NULL) return ESP_ERR_INVALID_ARG;
+
+    FILE *f = (FILE *)handle;
+    fclose(f);
+    ESP_LOGI(TAG, "Closed streaming write");
+    return ESP_OK;
+}

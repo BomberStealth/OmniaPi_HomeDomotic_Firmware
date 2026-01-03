@@ -17,7 +17,7 @@ static const char *TAG = "OMNIAPI_NODE";
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "OmniaPi Node v2.0.0 (ESP-IDF)");
+    ESP_LOGI(TAG, "OmniaPi Node v2.1.0 (ESP-IDF)");
 
     // Init NVS
     esp_err_t ret = nvs_flash_init();

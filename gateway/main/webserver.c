@@ -234,6 +234,139 @@ static esp_err_t api_node_ota_status_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+// POST /api/node-ota-start - Start OTA distribution to a node
+static esp_err_t api_node_ota_start_handler(httpd_req_t *req)
+{
+    char content[128];
+    int ret = httpd_req_recv(req, content, sizeof(content) - 1);
+    if (ret <= 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No data");
+        return ESP_FAIL;
+    }
+    content[ret] = '\0';
+
+    cJSON *json = cJSON_Parse(content);
+    cJSON *response = cJSON_CreateObject();
+
+    if (json) {
+        cJSON *mac_item = cJSON_GetObjectItem(json, "mac");
+        if (mac_item && cJSON_IsString(mac_item)) {
+            uint8_t mac[6];
+            if (node_manager_mac_from_string(mac_item->valuestring, mac)) {
+                esp_err_t err = ota_handler_start_node_update(mac);
+                if (err == ESP_OK) {
+                    cJSON_AddBoolToObject(response, "success", true);
+                    cJSON_AddStringToObject(response, "message", "OTA started");
+                } else {
+                    cJSON_AddBoolToObject(response, "success", false);
+                    cJSON_AddStringToObject(response, "error", "Failed to start OTA");
+                }
+            } else {
+                cJSON_AddBoolToObject(response, "success", false);
+                cJSON_AddStringToObject(response, "error", "Invalid MAC address");
+            }
+        } else {
+            cJSON_AddBoolToObject(response, "success", false);
+            cJSON_AddStringToObject(response, "error", "Missing MAC address");
+        }
+        cJSON_Delete(json);
+    } else {
+        cJSON_AddBoolToObject(response, "success", false);
+        cJSON_AddStringToObject(response, "error", "Invalid JSON");
+    }
+
+    char *resp_str = cJSON_PrintUnformatted(response);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, resp_str, strlen(resp_str));
+    free(resp_str);
+    cJSON_Delete(response);
+    return ESP_OK;
+}
+
+// POST /api/node-ota - Upload node firmware (streaming)
+static esp_err_t api_node_ota_handler(httpd_req_t *req)
+{
+    ESP_LOGI(TAG, "Node OTA upload request, size: %d", req->content_len);
+
+    if (req->content_len <= 0 || req->content_len > 1024 * 1024) {
+        cJSON *response = cJSON_CreateObject();
+        cJSON_AddBoolToObject(response, "success", false);
+        cJSON_AddStringToObject(response, "error", "Invalid firmware size");
+        char *resp_str = cJSON_PrintUnformatted(response);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, resp_str, strlen(resp_str));
+        free(resp_str);
+        cJSON_Delete(response);
+        return ESP_OK;
+    }
+
+    // Start streaming write to SPIFFS
+    esp_err_t err = ota_handler_node_fw_begin();
+    if (err != ESP_OK) {
+        cJSON *response = cJSON_CreateObject();
+        cJSON_AddBoolToObject(response, "success", false);
+        cJSON_AddStringToObject(response, "error", "Failed to open file");
+        char *resp_str = cJSON_PrintUnformatted(response);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, resp_str, strlen(resp_str));
+        free(resp_str);
+        cJSON_Delete(response);
+        return ESP_OK;
+    }
+
+    // Receive and write firmware data in chunks
+    char buf[1024];
+    int received = 0;
+    int total = req->content_len;
+    bool write_error = false;
+
+    while (received < total) {
+        int ret = httpd_req_recv(req, buf, sizeof(buf));
+        if (ret <= 0) {
+            if (ret == HTTPD_SOCK_ERR_TIMEOUT) continue;
+            write_error = true;
+            break;
+        }
+
+        err = ota_handler_node_fw_write((uint8_t *)buf, ret);
+        if (err != ESP_OK) {
+            write_error = true;
+            break;
+        }
+
+        received += ret;
+    }
+
+    // End streaming write
+    if (!write_error) {
+        err = ota_handler_node_fw_end(received);
+    } else {
+        ota_handler_node_fw_end(0);  // Close file even on error
+        err = ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "Received %d bytes of node firmware", received);
+
+    cJSON *response = cJSON_CreateObject();
+    if (err == ESP_OK && !write_error) {
+        cJSON_AddBoolToObject(response, "success", true);
+        cJSON_AddStringToObject(response, "message", "Firmware stored");
+        cJSON_AddNumberToObject(response, "size", received);
+        ESP_LOGI(TAG, "Node firmware stored successfully");
+    } else {
+        cJSON_AddBoolToObject(response, "success", false);
+        cJSON_AddStringToObject(response, "error", "Failed to store firmware");
+        ESP_LOGE(TAG, "Failed to store node firmware");
+    }
+
+    char *resp_str = cJSON_PrintUnformatted(response);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, resp_str, strlen(resp_str));
+    free(resp_str);
+    cJSON_Delete(response);
+    return ESP_OK;
+}
+
 // ============== URI Definitions ==============
 static const httpd_uri_t uri_root = {
     .uri = "/",
@@ -277,13 +410,25 @@ static const httpd_uri_t uri_node_ota_status = {
     .handler = api_node_ota_status_handler,
 };
 
+static const httpd_uri_t uri_node_ota = {
+    .uri = "/api/node-ota",
+    .method = HTTP_POST,
+    .handler = api_node_ota_handler,
+};
+
+static const httpd_uri_t uri_node_ota_start = {
+    .uri = "/api/node-ota-start",
+    .method = HTTP_POST,
+    .handler = api_node_ota_start_handler,
+};
+
 // ============== Public Functions ==============
 esp_err_t webserver_init(void)
 {
     ESP_LOGI(TAG, "Starting HTTP server");
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 10;
+    config.max_uri_handlers = 12;
     config.stack_size = 8192;
     config.uri_match_fn = httpd_uri_match_wildcard;
 
@@ -301,6 +446,8 @@ esp_err_t webserver_init(void)
     httpd_register_uri_handler(s_server, &uri_api_discover);
     httpd_register_uri_handler(s_server, &uri_update);
     httpd_register_uri_handler(s_server, &uri_node_ota_status);
+    httpd_register_uri_handler(s_server, &uri_node_ota);
+    httpd_register_uri_handler(s_server, &uri_node_ota_start);
 
     ESP_LOGI(TAG, "HTTP server started on port 80");
     return ESP_OK;

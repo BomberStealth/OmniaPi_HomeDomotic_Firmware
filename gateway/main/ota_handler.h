@@ -56,6 +56,27 @@ esp_err_t ota_handler_gateway_update(const uint8_t *data, size_t len, bool is_fi
 esp_err_t ota_handler_store_node_firmware(const uint8_t *data, size_t len);
 
 /**
+ * Begin streaming node firmware storage
+ * @return ESP_OK on success
+ */
+esp_err_t ota_handler_node_fw_begin(void);
+
+/**
+ * Write chunk of node firmware
+ * @param data Firmware chunk
+ * @param len Chunk length
+ * @return ESP_OK on success
+ */
+esp_err_t ota_handler_node_fw_write(const uint8_t *data, size_t len);
+
+/**
+ * End streaming node firmware storage
+ * @param total_size Total bytes written
+ * @return ESP_OK on success
+ */
+esp_err_t ota_handler_node_fw_end(size_t total_size);
+
+/**
  * Start node OTA update via ESP-NOW
  * @param mac Target node MAC address
  * @return ESP_OK on success
@@ -72,6 +93,15 @@ const ota_status_t *ota_handler_get_status(void);
  * Process OTA (call periodically for node OTA)
  */
 void ota_handler_process(void);
+
+/**
+ * Handle OTA message from node
+ * @param mac Node MAC address
+ * @param msg_type Message type (OTA_READY, OTA_ACK, OTA_DONE, OTA_ERROR)
+ * @param data Optional data (chunk number for ACK)
+ * @param len Data length
+ */
+void ota_handler_on_node_message(const uint8_t *mac, uint8_t msg_type, const uint8_t *data, int len);
 
 #ifdef __cplusplus
 }

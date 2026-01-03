@@ -60,6 +60,29 @@ bool storage_file_exists(const char *path);
  */
 int storage_get_file_size(const char *path);
 
+/**
+ * Open file for streaming write
+ * @param path File path
+ * @return Handle (cast to void*) or NULL on error
+ */
+void *storage_open_write(const char *path);
+
+/**
+ * Write chunk to open file
+ * @param handle File handle from storage_open_write
+ * @param data Data to write
+ * @param len Data length
+ * @return ESP_OK on success
+ */
+esp_err_t storage_write_chunk(void *handle, const uint8_t *data, size_t len);
+
+/**
+ * Close streaming file
+ * @param handle File handle from storage_open_write
+ * @return ESP_OK on success
+ */
+esp_err_t storage_close_write(void *handle);
+
 #ifdef __cplusplus
 }
 #endif

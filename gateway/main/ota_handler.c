@@ -12,6 +12,7 @@
 #include "esp_now.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_wifi.h"
 
 static const char *TAG = "ota_handler";
 
@@ -27,11 +28,46 @@ static uint32_t s_node_fw_size = 0;
 static uint32_t s_node_ota_chunk = 0;
 static uint32_t s_node_ota_last_ack = 0;
 static int s_node_ota_retries = 0;
+static bool s_waiting_for_ready = false;
+static uint32_t s_node_ota_sent = 0;
 
 // ============== Helper ==============
 static uint32_t get_time_ms(void)
 {
     return (uint32_t)(esp_timer_get_time() / 1000);
+}
+
+// Send next chunk of firmware to node
+static void send_next_chunk(void)
+{
+    if (s_node_fw_file == NULL || !s_status.in_progress) return;
+
+    // Read chunk from file
+    uint8_t msg[5 + OTA_CHUNK_SIZE];
+    msg[0] = MSG_OTA_DATA;
+    msg[1] = s_node_ota_chunk & 0xFF;
+    msg[2] = (s_node_ota_chunk >> 8) & 0xFF;
+    msg[3] = (s_node_ota_chunk >> 16) & 0xFF;
+    msg[4] = (s_node_ota_chunk >> 24) & 0xFF;
+
+    size_t read_len = fread(msg + 5, 1, OTA_CHUNK_SIZE, s_node_fw_file);
+    if (read_len == 0) {
+        // End of file, send OTA_END
+        ESP_LOGI(TAG, "All chunks sent, sending OTA_END");
+        uint8_t end_msg[1] = {MSG_OTA_END};
+        esp_now_send(s_node_ota_target, end_msg, 1);
+        strcpy(s_status.status_message, "Finalizing...");
+        return;
+    }
+
+    esp_err_t err = esp_now_send(s_node_ota_target, msg, 5 + read_len);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to send chunk %lu", (unsigned long)s_node_ota_chunk);
+    } else {
+        ESP_LOGD(TAG, "Sent chunk %lu (%d bytes)", (unsigned long)s_node_ota_chunk, read_len);
+    }
+
+    s_node_ota_last_ack = get_time_ms();
 }
 
 // ============== Public Functions ==============
@@ -96,6 +132,51 @@ esp_err_t ota_handler_store_node_firmware(const uint8_t *data, size_t len)
     return storage_write_file("/node_fw.bin", data, len);
 }
 
+// Streaming write state
+static void *s_stream_handle = NULL;
+
+esp_err_t ota_handler_node_fw_begin(void)
+{
+    if (s_stream_handle != NULL) {
+        storage_close_write(s_stream_handle);
+        s_stream_handle = NULL;
+    }
+
+    s_stream_handle = storage_open_write("/node_fw.bin");
+    if (s_stream_handle == NULL) {
+        ESP_LOGE(TAG, "Failed to open node firmware file for writing");
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "Started streaming node firmware write");
+    return ESP_OK;
+}
+
+esp_err_t ota_handler_node_fw_write(const uint8_t *data, size_t len)
+{
+    if (s_stream_handle == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    return storage_write_chunk(s_stream_handle, data, len);
+}
+
+esp_err_t ota_handler_node_fw_end(size_t total_size)
+{
+    if (s_stream_handle == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_err_t ret = storage_close_write(s_stream_handle);
+    s_stream_handle = NULL;
+
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "Node firmware stored: %d bytes", total_size);
+    }
+
+    return ret;
+}
+
 esp_err_t ota_handler_start_node_update(const uint8_t *mac)
 {
     if (mac == NULL) return ESP_ERR_INVALID_ARG;
@@ -135,6 +216,15 @@ esp_err_t ota_handler_start_node_update(const uint8_t *mac)
     node_manager_mac_to_string(mac, mac_str);
     ESP_LOGI(TAG, "Starting node OTA: %s, size=%lu", mac_str, (unsigned long)fw_size);
 
+    // Add peer for ESP-NOW
+    esp_now_peer_info_t peer_info = {
+        .channel = 0,
+        .ifidx = WIFI_IF_STA,
+        .encrypt = false,
+    };
+    memcpy(peer_info.peer_addr, mac, 6);
+    esp_now_add_peer(&peer_info);  // Ignore if already exists
+
     // Send OTA_BEGIN message
     uint8_t msg[5];
     msg[0] = MSG_OTA_BEGIN;
@@ -143,8 +233,10 @@ esp_err_t ota_handler_start_node_update(const uint8_t *mac)
     msg[3] = (fw_size >> 16) & 0xFF;
     msg[4] = (fw_size >> 24) & 0xFF;
 
-    espnow_master_send_command(mac, 0, 0);  // This adds peer
+    s_waiting_for_ready = true;
+    s_node_ota_sent = 0;
     esp_now_send(mac, msg, 5);
+    strcpy(s_status.status_message, "Waiting for node...");
 
     return ESP_OK;
 }
@@ -163,7 +255,7 @@ void ota_handler_process(void)
     // Check for timeout
     if (now - s_node_ota_last_ack > 5000) {
         s_node_ota_retries++;
-        if (s_node_ota_retries > 3) {
+        if (s_node_ota_retries > 10) {
             ESP_LOGE(TAG, "Node OTA timeout");
             s_status.in_progress = false;
             s_status.error = true;
@@ -175,9 +267,102 @@ void ota_handler_process(void)
             return;
         }
 
-        // Retry current chunk
+        // Retry current chunk or OTA_BEGIN
         ESP_LOGW(TAG, "Node OTA retry %d", s_node_ota_retries);
+        if (s_waiting_for_ready) {
+            // Resend OTA_BEGIN
+            uint8_t msg[5];
+            msg[0] = MSG_OTA_BEGIN;
+            msg[1] = s_node_fw_size & 0xFF;
+            msg[2] = (s_node_fw_size >> 8) & 0xFF;
+            msg[3] = (s_node_fw_size >> 16) & 0xFF;
+            msg[4] = (s_node_fw_size >> 24) & 0xFF;
+            esp_now_send(s_node_ota_target, msg, 5);
+        } else {
+            // Resend current chunk - rewind file to current chunk position
+            fseek(s_node_fw_file, s_node_ota_chunk * OTA_CHUNK_SIZE, SEEK_SET);
+            send_next_chunk();
+        }
         s_node_ota_last_ack = now;
-        // Re-send would go here
+    }
+}
+
+void ota_handler_on_node_message(const uint8_t *mac, uint8_t msg_type, const uint8_t *data, int len)
+{
+    if (!s_status.in_progress) return;
+
+    // Verify it's from our target node
+    if (memcmp(mac, s_node_ota_target, 6) != 0) {
+        ESP_LOGW(TAG, "OTA message from unexpected node");
+        return;
+    }
+
+    s_node_ota_last_ack = get_time_ms();
+    s_node_ota_retries = 0;
+
+    switch (msg_type) {
+        case MSG_OTA_READY:
+            ESP_LOGI(TAG, "Node ready for OTA");
+            s_waiting_for_ready = false;
+            strcpy(s_status.status_message, "Sending firmware...");
+            // Start sending chunks
+            send_next_chunk();
+            break;
+
+        case MSG_OTA_ACK: {
+            // Extract chunk number from ACK
+            uint32_t ack_chunk = 0;
+            if (len >= 5) {
+                ack_chunk = data[1] | (data[2] << 8) | (data[3] << 16) | (data[4] << 24);
+            }
+
+            if (ack_chunk == s_node_ota_chunk) {
+                s_node_ota_sent += OTA_CHUNK_SIZE;
+                if (s_node_ota_sent > s_node_fw_size) {
+                    s_node_ota_sent = s_node_fw_size;
+                }
+                s_status.sent_size = s_node_ota_sent;
+                s_status.progress_percent = (s_node_ota_sent * 100) / s_node_fw_size;
+
+                // Update status message
+                snprintf(s_status.status_message, sizeof(s_status.status_message),
+                         "Sending... %d%%", s_status.progress_percent);
+
+                // Send next chunk
+                s_node_ota_chunk++;
+                send_next_chunk();
+            } else {
+                ESP_LOGW(TAG, "Unexpected ACK: got %lu, expected %lu",
+                         (unsigned long)ack_chunk, (unsigned long)s_node_ota_chunk);
+            }
+            break;
+        }
+
+        case MSG_OTA_DONE:
+            ESP_LOGI(TAG, "Node OTA complete!");
+            s_status.in_progress = false;
+            s_status.success = true;
+            s_status.progress_percent = 100;
+            strcpy(s_status.status_message, "OTA Complete!");
+            if (s_node_fw_file) {
+                fclose(s_node_fw_file);
+                s_node_fw_file = NULL;
+            }
+            break;
+
+        case MSG_OTA_ERROR:
+            ESP_LOGE(TAG, "Node reported OTA error");
+            s_status.in_progress = false;
+            s_status.error = true;
+            strcpy(s_status.status_message, "Node error");
+            if (s_node_fw_file) {
+                fclose(s_node_fw_file);
+                s_node_fw_file = NULL;
+            }
+            break;
+
+        default:
+            ESP_LOGW(TAG, "Unknown OTA message type: 0x%02X", msg_type);
+            break;
     }
 }

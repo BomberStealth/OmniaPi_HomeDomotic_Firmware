@@ -83,6 +83,8 @@
             font-size: 0.8rem;
             color: rgba(255,255,255,0.5);
             margin-bottom: 12px;
+            flex-wrap: wrap;
+            align-items: center;
         }
         .relay-row {
             display: flex;
@@ -118,6 +120,7 @@
         .btn-on { background: #6ad4a0; color: #1a1a2e; }
         .btn-off { background: rgba(255,255,255,0.15); color: #fff; }
         .btn-sm { padding: 4px 10px; font-size: 0.75rem; }
+        .btn-ota { background: #f59e0b; color: #1a1a2e; }
         .btn-refresh {
             background: transparent;
             border: 1px solid rgba(255,255,255,0.2);
@@ -127,8 +130,7 @@
         }
 
         /* OTA */
-        .ota-section { margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.1); }
-        .ota-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+        .ota-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
         .ota-label { font-size: 0.85rem; color: rgba(255,255,255,0.6); min-width: 120px; }
         input[type="file"] { display: none; }
         .file-btn {
@@ -145,8 +147,9 @@
             background: rgba(255,255,255,0.1);
             border-radius: 3px;
             overflow: hidden;
-            flex: 1;
+            width: 100%;
             display: none;
+            margin-top: 8px;
         }
         .progress-bar {
             height: 100%;
@@ -157,6 +160,14 @@
         .msg { padding: 8px 12px; border-radius: 6px; font-size: 0.85rem; margin-top: 10px; }
         .msg-success { background: rgba(106,212,160,0.2); color: #6ad4a0; }
         .msg-error { background: rgba(239,68,68,0.2); color: #ef4444; }
+        .node-ota-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 0;
+            border-top: 1px solid rgba(255,255,255,0.05);
+            flex-wrap: wrap;
+        }
 
         .empty-state { text-align: center; padding: 40px; color: rgba(255,255,255,0.4); }
         .discover-btn {
@@ -223,9 +234,8 @@
         </div>
 
         <div class="card">
-            <h2>Firmware Update</h2>
+            <h2>Gateway Firmware Update</h2>
             <div class="ota-row">
-                <span class="ota-label">Gateway OTA:</span>
                 <label class="file-btn" for="gw-file">Select .bin</label>
                 <input type="file" id="gw-file" accept=".bin" onchange="handleGwFile(this)">
                 <span id="gw-name">No file</span>
@@ -238,6 +248,7 @@
 
     <script>
         let gwFile = null;
+        let currentNodeOtaMac = null;
 
         async function fetchStatus() {
             try {
@@ -274,10 +285,11 @@
                     return;
                 }
 
-                container.innerHTML = nodes.map(n => {
+                container.innerHTML = nodes.map((n, idx) => {
                     const relays = n.relays || [0, 0];
+                    const macId = n.mac.replace(/:/g, '');
                     return `
-                    <div class="node-card">
+                    <div class="node-card" id="node-${macId}">
                         <div class="node-header">
                             <span class="node-mac">${n.mac}</span>
                             <span class="node-status ${n.online ? 'node-online' : 'node-offline'}">${n.online ? 'Online' : 'Offline'}</span>
@@ -285,7 +297,6 @@
                         <div class="node-info">
                             <span>RSSI: ${n.rssi} dBm</span>
                             <span>Ver: ${n.version || '?'}</span>
-                            <span>${n.lastSeen || ''}</span>
                         </div>
                         <div class="relay-row">
                             <span class="relay-label">Relay 1</span>
@@ -299,6 +310,13 @@
                             <button class="btn btn-on btn-sm" onclick="cmd('${n.mac}',2,'on')" ${!n.online ? 'disabled' : ''}>ON</button>
                             <button class="btn btn-off btn-sm" onclick="cmd('${n.mac}',2,'off')" ${!n.online ? 'disabled' : ''}>OFF</button>
                         </div>
+                        <div class="node-ota-row">
+                            <input type="file" id="file-${macId}" accept=".bin" onchange="handleNodeOtaFile(this, '${n.mac}')">
+                            <label class="btn btn-ota btn-sm" for="file-${macId}" ${!n.online ? 'style="opacity:0.5;pointer-events:none"' : ''}>Update Firmware</label>
+                            <span id="name-${macId}" style="font-size:0.75rem;color:rgba(255,255,255,0.5)"></span>
+                        </div>
+                        <div class="progress" id="progress-${macId}"><div class="progress-bar" id="bar-${macId}"></div></div>
+                        <div id="msg-${macId}"></div>
                     </div>`;
                 }).join('');
             } catch (e) {
@@ -338,9 +356,6 @@
 
         function uploadGw() {
             if (!gwFile) return;
-            const formData = new FormData();
-            formData.append('firmware', gwFile);
-
             document.getElementById('gw-progress').style.display = 'block';
             const xhr = new XMLHttpRequest();
             xhr.upload.onprogress = e => {
@@ -360,7 +375,112 @@
                 document.getElementById('gw-msg').innerHTML = '<div class="msg msg-error">Upload error</div>';
             };
             xhr.open('POST', '/update');
-            xhr.send(formData);
+            xhr.send(gwFile);
+        }
+
+        function handleNodeOtaFile(input, mac) {
+            if (!input.files[0] || !input.files[0].name.endsWith('.bin')) return;
+
+            const file = input.files[0];
+            const macId = mac.replace(/:/g, '');
+
+            document.getElementById('name-' + macId).textContent = file.name + ' (' + (file.size/1024).toFixed(1) + ' KB)';
+
+            if (!confirm('Upload firmware to node ' + mac + '?')) {
+                input.value = '';
+                document.getElementById('name-' + macId).textContent = '';
+                return;
+            }
+
+            uploadNodeOta(mac, file);
+        }
+
+        async function uploadNodeOta(mac, file) {
+            const macId = mac.replace(/:/g, '');
+            const progressEl = document.getElementById('progress-' + macId);
+            const barEl = document.getElementById('bar-' + macId);
+            const msgEl = document.getElementById('msg-' + macId);
+
+            progressEl.style.display = 'block';
+            barEl.style.width = '0%';
+            msgEl.innerHTML = '<div class="msg">Uploading firmware...</div>';
+
+            currentNodeOtaMac = mac;
+
+            const xhr = new XMLHttpRequest();
+            xhr.upload.onprogress = e => {
+                if (e.lengthComputable) {
+                    barEl.style.width = (e.loaded/e.total*50) + '%';
+                }
+            };
+            xhr.onload = async () => {
+                try {
+                    const result = JSON.parse(xhr.responseText);
+                    if (result.success) {
+                        barEl.style.width = '50%';
+                        msgEl.innerHTML = '<div class="msg msg-success">Firmware stored! Starting OTA to node...</div>';
+
+                        // Start OTA distribution
+                        const startRes = await fetch('/api/node-ota-start', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({mac})
+                        });
+                        const startResult = await startRes.json();
+
+                        if (startResult.success) {
+                            pollNodeOtaStatus(mac);
+                        } else {
+                            msgEl.innerHTML = '<div class="msg msg-error">Failed to start OTA: ' + (startResult.error || 'Unknown') + '</div>';
+                        }
+                    } else {
+                        msgEl.innerHTML = '<div class="msg msg-error">Upload error: ' + (result.error || 'Unknown') + '</div>';
+                    }
+                } catch (e) {
+                    msgEl.innerHTML = '<div class="msg msg-error">Response error</div>';
+                }
+            };
+            xhr.onerror = () => {
+                msgEl.innerHTML = '<div class="msg msg-error">Network error</div>';
+            };
+            xhr.open('POST', '/api/node-ota');
+            xhr.send(file);
+        }
+
+        let otaPolling = null;
+        function pollNodeOtaStatus(mac) {
+            const macId = mac.replace(/:/g, '');
+            const progressEl = document.getElementById('progress-' + macId);
+            const barEl = document.getElementById('bar-' + macId);
+            const msgEl = document.getElementById('msg-' + macId);
+
+            if (otaPolling) clearInterval(otaPolling);
+
+            otaPolling = setInterval(async () => {
+                try {
+                    const r = await fetch('/api/node-ota-status');
+                    const s = await r.json();
+
+                    if (s.inProgress) {
+                        barEl.style.width = (50 + s.progress/2) + '%';
+                        msgEl.innerHTML = '<div class="msg">' + s.status + ' (' + s.progress + '%)</div>';
+                    } else {
+                        if (s.success) {
+                            barEl.style.width = '100%';
+                            msgEl.innerHTML = '<div class="msg msg-success">OTA Complete! Node will reboot.</div>';
+                            setTimeout(fetchNodes, 3000);
+                        } else if (s.error) {
+                            msgEl.innerHTML = '<div class="msg msg-error">' + s.status + '</div>';
+                        }
+                        clearInterval(otaPolling);
+                        otaPolling = null;
+                        setTimeout(() => { progressEl.style.display = 'none'; }, 3000);
+                    }
+                } catch (e) {
+                    clearInterval(otaPolling);
+                    otaPolling = null;
+                }
+            }, 1000);
         }
 
         // Initial fetch
@@ -369,7 +489,7 @@
 
         // Auto-refresh
         setInterval(fetchStatus, 5000);
-        setInterval(fetchNodes, 3000);
+        setInterval(fetchNodes, 5000);
     </script>
 </body>
 </html>

@@ -5,6 +5,7 @@
 
 #include "espnow_master.h"
 #include "node_manager.h"
+#include "ota_handler.h"
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -84,8 +85,9 @@ static void espnow_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t *
         case MSG_OTA_ACK:
         case MSG_OTA_DONE:
         case MSG_OTA_ERROR:
-            // OTA messages handled by ota_handler
+            // Pass OTA messages to ota_handler
             ESP_LOGI(TAG, "OTA message 0x%02X from %s", msg_type, mac_str);
+            ota_handler_on_node_message(src_addr, msg_type, data, len);
             break;
 
         default:

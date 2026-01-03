@@ -10,11 +10,20 @@
 #include "esp_now.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "esp_ota_ops.h"
+#include "esp_system.h"
 
 static const char *TAG = "ESPNOW";
 
+// OTA state
+static esp_ota_handle_t s_ota_handle = 0;
+static const esp_partition_t *s_ota_partition = NULL;
+static uint32_t s_ota_total_size = 0;
+static uint32_t s_ota_received = 0;
+static bool s_ota_in_progress = false;
+
 // Firmware version
-#define FIRMWARE_VERSION "2.0.0"
+#define FIRMWARE_VERSION "2.1.0"
 
 // Gateway MAC address (E8:9F:6D:BB:F8:F8)
 static const uint8_t GATEWAY_MAC[] = {0xe8, 0x9f, 0x6d, 0xbb, 0xf8, 0xf8};
@@ -59,6 +68,129 @@ static void send_command_ack(uint8_t channel, uint8_t state) {
         ESP_LOGW(TAG, "COMMAND_ACK failed: %s", esp_err_to_name(result));
     }
 }
+
+// ============== OTA Functions ==============
+
+// Send OTA response message
+static void send_ota_response(uint8_t msg_type, uint32_t chunk_num) {
+    uint8_t response[5] = {msg_type};
+    response[1] = chunk_num & 0xFF;
+    response[2] = (chunk_num >> 8) & 0xFF;
+    response[3] = (chunk_num >> 16) & 0xFF;
+    response[4] = (chunk_num >> 24) & 0xFF;
+    esp_now_send(GATEWAY_MAC, response, 5);
+}
+
+// Handle OTA BEGIN: [0x10][size_4bytes]
+static void handle_ota_begin(const uint8_t *data, int len) {
+    if (len < 5) {
+        ESP_LOGE(TAG, "OTA BEGIN: invalid length %d", len);
+        send_ota_response(MSG_OTA_ERROR, 0);
+        return;
+    }
+
+    s_ota_total_size = data[1] | (data[2] << 8) | (data[3] << 16) | (data[4] << 24);
+    ESP_LOGI(TAG, "OTA BEGIN: size=%lu", (unsigned long)s_ota_total_size);
+
+    // Get next OTA partition
+    s_ota_partition = esp_ota_get_next_update_partition(NULL);
+    if (s_ota_partition == NULL) {
+        ESP_LOGE(TAG, "No OTA partition found");
+        send_ota_response(MSG_OTA_ERROR, 0);
+        return;
+    }
+
+    // Start OTA
+    esp_err_t err = esp_ota_begin(s_ota_partition, s_ota_total_size, &s_ota_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_ota_begin failed: %s", esp_err_to_name(err));
+        send_ota_response(MSG_OTA_ERROR, 0);
+        return;
+    }
+
+    s_ota_received = 0;
+    s_ota_in_progress = true;
+
+    ESP_LOGI(TAG, "OTA started, partition: %s", s_ota_partition->label);
+    send_ota_response(MSG_OTA_READY, 0);
+}
+
+// Handle OTA DATA: [0x12][chunk_num_4bytes][data...]
+static void handle_ota_data(const uint8_t *data, int len) {
+    if (!s_ota_in_progress) {
+        ESP_LOGW(TAG, "OTA DATA received but no OTA in progress");
+        return;
+    }
+
+    if (len < 6) {
+        ESP_LOGE(TAG, "OTA DATA: invalid length %d", len);
+        return;
+    }
+
+    uint32_t chunk_num = data[1] | (data[2] << 8) | (data[3] << 16) | (data[4] << 24);
+    const uint8_t *chunk_data = data + 5;
+    size_t chunk_len = len - 5;
+
+    esp_err_t err = esp_ota_write(s_ota_handle, chunk_data, chunk_len);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_ota_write failed: %s", esp_err_to_name(err));
+        esp_ota_abort(s_ota_handle);
+        s_ota_in_progress = false;
+        send_ota_response(MSG_OTA_ERROR, chunk_num);
+        return;
+    }
+
+    s_ota_received += chunk_len;
+
+    // Log progress every 10%
+    if (s_ota_total_size > 0) {
+        int progress = (s_ota_received * 100) / s_ota_total_size;
+        static int last_progress = -10;
+        if (progress >= last_progress + 10) {
+            ESP_LOGI(TAG, "OTA progress: %d%% (%lu/%lu)", progress,
+                     (unsigned long)s_ota_received, (unsigned long)s_ota_total_size);
+            last_progress = progress;
+        }
+    }
+
+    send_ota_response(MSG_OTA_ACK, chunk_num);
+}
+
+// Handle OTA END: [0x14]
+static void handle_ota_end(void) {
+    if (!s_ota_in_progress) {
+        ESP_LOGW(TAG, "OTA END received but no OTA in progress");
+        return;
+    }
+
+    ESP_LOGI(TAG, "OTA END received, finalizing...");
+
+    esp_err_t err = esp_ota_end(s_ota_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_ota_end failed: %s", esp_err_to_name(err));
+        s_ota_in_progress = false;
+        send_ota_response(MSG_OTA_ERROR, 0);
+        return;
+    }
+
+    err = esp_ota_set_boot_partition(s_ota_partition);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_ota_set_boot_partition failed: %s", esp_err_to_name(err));
+        s_ota_in_progress = false;
+        send_ota_response(MSG_OTA_ERROR, 0);
+        return;
+    }
+
+    s_ota_in_progress = false;
+    ESP_LOGI(TAG, "OTA complete! Rebooting in 1 second...");
+
+    send_ota_response(MSG_OTA_DONE, 0);
+
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    esp_restart();
+}
+
+// ============== Command Functions ==============
 
 // Handle relay command
 static void handle_command(uint8_t channel, uint8_t action) {
@@ -125,6 +257,22 @@ static void espnow_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t *
         uint8_t channel = data[1];
         uint8_t action = data[2];
         handle_command(channel, action);
+        return;
+    }
+
+    // Handle OTA messages
+    if (data[0] == MSG_OTA_BEGIN) {
+        handle_ota_begin(data, len);
+        return;
+    }
+
+    if (data[0] == MSG_OTA_DATA) {
+        handle_ota_data(data, len);
+        return;
+    }
+
+    if (data[0] == MSG_OTA_END) {
+        handle_ota_end();
         return;
     }
 
