@@ -179,23 +179,37 @@ esp_err_t ota_handler_node_fw_end(size_t total_size)
 
 esp_err_t ota_handler_start_node_update(const uint8_t *mac)
 {
-    if (mac == NULL) return ESP_ERR_INVALID_ARG;
+    ESP_LOGI(TAG, "=== ota_handler_start_node_update CALLED ===");
+
+    if (mac == NULL) {
+        ESP_LOGE(TAG, "MAC is NULL!");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    ESP_LOGI(TAG, "Target MAC: %02X:%02X:%02X:%02X:%02X:%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
     // Check if firmware file exists
     int fw_size = storage_get_file_size("/node_fw.bin");
+    ESP_LOGI(TAG, "Firmware file size: %d bytes", fw_size);
+
     if (fw_size <= 0) {
+        ESP_LOGE(TAG, "No firmware file found on SPIFFS!");
         strcpy(s_status.status_message, "No firmware file");
         s_status.error = true;
         return ESP_ERR_NOT_FOUND;
     }
 
     // Open firmware file
+    ESP_LOGI(TAG, "Opening /spiffs/node_fw.bin...");
     s_node_fw_file = fopen("/spiffs/node_fw.bin", "rb");
     if (s_node_fw_file == NULL) {
+        ESP_LOGE(TAG, "Failed to open firmware file!");
         strcpy(s_status.status_message, "Failed to open firmware");
         s_status.error = true;
         return ESP_FAIL;
     }
+    ESP_LOGI(TAG, "Firmware file opened successfully");
 
     // Initialize state
     memcpy(s_node_ota_target, mac, 6);
@@ -223,7 +237,8 @@ esp_err_t ota_handler_start_node_update(const uint8_t *mac)
         .encrypt = false,
     };
     memcpy(peer_info.peer_addr, mac, 6);
-    esp_now_add_peer(&peer_info);  // Ignore if already exists
+    esp_err_t peer_err = esp_now_add_peer(&peer_info);
+    ESP_LOGI(TAG, "esp_now_add_peer result: %s", esp_err_to_name(peer_err));
 
     // Send OTA_BEGIN message
     uint8_t msg[5];
@@ -235,7 +250,11 @@ esp_err_t ota_handler_start_node_update(const uint8_t *mac)
 
     s_waiting_for_ready = true;
     s_node_ota_sent = 0;
-    esp_now_send(mac, msg, 5);
+
+    ESP_LOGI(TAG, ">>> SENDING MSG_OTA_BEGIN (0x%02X) to node, size=%d <<<", MSG_OTA_BEGIN, fw_size);
+    esp_err_t send_err = esp_now_send(mac, msg, 5);
+    ESP_LOGI(TAG, "esp_now_send result: %s", esp_err_to_name(send_err));
+
     strcpy(s_status.status_message, "Waiting for node...");
 
     return ESP_OK;

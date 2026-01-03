@@ -23,7 +23,7 @@ static uint32_t s_ota_received = 0;
 static bool s_ota_in_progress = false;
 
 // Firmware version
-#define FIRMWARE_VERSION "2.1.0"
+#define FIRMWARE_VERSION "2.3.0"
 
 // Gateway MAC address (E8:9F:6D:BB:F8:F8)
 static const uint8_t GATEWAY_MAC[] = {0xe8, 0x9f, 0x6d, 0xbb, 0xf8, 0xf8};
@@ -83,14 +83,17 @@ static void send_ota_response(uint8_t msg_type, uint32_t chunk_num) {
 
 // Handle OTA BEGIN: [0x10][size_4bytes]
 static void handle_ota_begin(const uint8_t *data, int len) {
+    ESP_LOGI(TAG, "=== handle_ota_begin CALLED ===");
+    ESP_LOGI(TAG, "Data length: %d", len);
+
     if (len < 5) {
-        ESP_LOGE(TAG, "OTA BEGIN: invalid length %d", len);
+        ESP_LOGE(TAG, "OTA BEGIN: invalid length %d (need 5)", len);
         send_ota_response(MSG_OTA_ERROR, 0);
         return;
     }
 
     s_ota_total_size = data[1] | (data[2] << 8) | (data[3] << 16) | (data[4] << 24);
-    ESP_LOGI(TAG, "OTA BEGIN: size=%lu", (unsigned long)s_ota_total_size);
+    ESP_LOGI(TAG, ">>> OTA BEGIN: firmware size=%lu bytes <<<", (unsigned long)s_ota_total_size);
 
     // Get next OTA partition
     s_ota_partition = esp_ota_get_next_update_partition(NULL);
@@ -230,9 +233,17 @@ static void handle_command(uint8_t channel, uint8_t action) {
 static void espnow_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t *data, int len) {
     if (len < 1) return;
 
-    // Log received message
-    ESP_LOGI(TAG, "RX: len=%d type=0x%02X from=" MACSTR,
-             len, data[0], MAC2STR(recv_info->src_addr));
+    // Log ALL received messages with detail
+    ESP_LOGI(TAG, "========================================");
+    ESP_LOGI(TAG, "ESP-NOW RX: len=%d, type=0x%02X", len, data[0]);
+    ESP_LOGI(TAG, "From MAC: " MACSTR, MAC2STR(recv_info->src_addr));
+
+    // Log first bytes for debugging
+    if (len >= 5) {
+        ESP_LOGI(TAG, "Data[0-4]: 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X",
+                 data[0], data[1], data[2], data[3], data[4]);
+    }
+    ESP_LOGI(TAG, "========================================");
 
     // Handle heartbeat (1 byte, type 0x01)
     if (len == 1 && data[0] == MSG_HEARTBEAT) {
@@ -262,16 +273,19 @@ static void espnow_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t *
 
     // Handle OTA messages
     if (data[0] == MSG_OTA_BEGIN) {
+        ESP_LOGI(TAG, ">>> MSG_OTA_BEGIN (0x%02X) detected! <<<", MSG_OTA_BEGIN);
         handle_ota_begin(data, len);
         return;
     }
 
     if (data[0] == MSG_OTA_DATA) {
+        ESP_LOGD(TAG, "MSG_OTA_DATA received");
         handle_ota_data(data, len);
         return;
     }
 
     if (data[0] == MSG_OTA_END) {
+        ESP_LOGI(TAG, ">>> MSG_OTA_END detected! <<<");
         handle_ota_end();
         return;
     }

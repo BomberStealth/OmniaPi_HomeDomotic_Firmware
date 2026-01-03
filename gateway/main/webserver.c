@@ -237,13 +237,18 @@ static esp_err_t api_node_ota_status_handler(httpd_req_t *req)
 // POST /api/node-ota-start - Start OTA distribution to a node
 static esp_err_t api_node_ota_start_handler(httpd_req_t *req)
 {
+    ESP_LOGI(TAG, "=== /api/node-ota-start CALLED ===");
+
     char content[128];
     int ret = httpd_req_recv(req, content, sizeof(content) - 1);
     if (ret <= 0) {
+        ESP_LOGE(TAG, "No data received in request");
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No data");
         return ESP_FAIL;
     }
     content[ret] = '\0';
+
+    ESP_LOGI(TAG, "Received: %s", content);
 
     cJSON *json = cJSON_Parse(content);
     cJSON *response = cJSON_CreateObject();
@@ -251,9 +256,12 @@ static esp_err_t api_node_ota_start_handler(httpd_req_t *req)
     if (json) {
         cJSON *mac_item = cJSON_GetObjectItem(json, "mac");
         if (mac_item && cJSON_IsString(mac_item)) {
+            ESP_LOGI(TAG, "MAC from request: %s", mac_item->valuestring);
             uint8_t mac[6];
             if (node_manager_mac_from_string(mac_item->valuestring, mac)) {
+                ESP_LOGI(TAG, "Calling ota_handler_start_node_update...");
                 esp_err_t err = ota_handler_start_node_update(mac);
+                ESP_LOGI(TAG, "ota_handler_start_node_update returned: %s", esp_err_to_name(err));
                 if (err == ESP_OK) {
                     cJSON_AddBoolToObject(response, "success", true);
                     cJSON_AddStringToObject(response, "message", "OTA started");
@@ -262,15 +270,18 @@ static esp_err_t api_node_ota_start_handler(httpd_req_t *req)
                     cJSON_AddStringToObject(response, "error", "Failed to start OTA");
                 }
             } else {
+                ESP_LOGE(TAG, "Failed to parse MAC address");
                 cJSON_AddBoolToObject(response, "success", false);
                 cJSON_AddStringToObject(response, "error", "Invalid MAC address");
             }
         } else {
+            ESP_LOGE(TAG, "Missing MAC address in JSON");
             cJSON_AddBoolToObject(response, "success", false);
             cJSON_AddStringToObject(response, "error", "Missing MAC address");
         }
         cJSON_Delete(json);
     } else {
+        ESP_LOGE(TAG, "Failed to parse JSON");
         cJSON_AddBoolToObject(response, "success", false);
         cJSON_AddStringToObject(response, "error", "Invalid JSON");
     }
