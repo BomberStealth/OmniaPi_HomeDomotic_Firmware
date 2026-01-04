@@ -4,6 +4,7 @@ idf_component_register(
     SRCS
         "main.c"
         "wifi_manager.c"
+        "eth_manager.c"
         "captive_portal.c"
         "espnow_master.c"
         "node_manager.c"
@@ -19,6 +20,7 @@ idf_component_register(
     REQUIRES
         nvs_flash
         esp_wifi
+        esp_eth
         esp_netif
         esp_event
         esp_http_server
