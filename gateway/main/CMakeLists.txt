@@ -4,12 +4,14 @@ idf_component_register(
     SRCS
         "main.c"
         "wifi_manager.c"
+        "captive_portal.c"
         "espnow_master.c"
         "node_manager.c"
         "mqtt_handler.c"
         "webserver.c"
         "storage.c"
         "ota_handler.c"
+        "backend_client.c"
     INCLUDE_DIRS
         "."
     EMBED_FILES
@@ -20,6 +22,7 @@ idf_component_register(
         esp_netif
         esp_event
         esp_http_server
+        esp_http_client
         mqtt
         spiffs
         app_update
