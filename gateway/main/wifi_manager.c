@@ -267,6 +267,12 @@ esp_err_t wifi_manager_init(void)
     // Disable power saving
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
 
+    // Set STA mode and START WiFi - required for ESP-NOW to work!
+    // ESP-NOW needs WiFi to be running even if we're using Ethernet
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_start());
+    ESP_LOGI(TAG, "WiFi started in STA mode (for ESP-NOW)");
+
     s_initialized = true;
     ESP_LOGI(TAG, "WiFi Manager initialized");
 
@@ -313,6 +319,9 @@ esp_err_t wifi_manager_connect_to(const char *ssid, const char *password, uint32
     } else {
         wifi_config.sta.threshold.authmode = WIFI_AUTH_OPEN;
     }
+
+    // Stop WiFi first if already running (to reconfigure)
+    esp_wifi_stop();
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
@@ -374,6 +383,9 @@ esp_err_t wifi_manager_start_ap(void)
 #else
     wifi_config.ap.authmode = WIFI_AUTH_OPEN;
 #endif
+
+    // Stop WiFi first if already running (to reconfigure)
+    esp_wifi_stop();
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));

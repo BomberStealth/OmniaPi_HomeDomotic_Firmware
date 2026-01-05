@@ -11,6 +11,7 @@
 #include "ota_handler.h"
 #include <string.h>
 #include <stdio.h>
+#include <sys/socket.h>
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -179,27 +180,71 @@ static esp_err_t ota_update_handler(httpd_req_t *req)
 {
     ESP_LOGI(TAG, "OTA update request, size: %d", req->content_len);
 
-    char buf[1024];
+    // Validate content length
+    if (req->content_len <= 0) {
+        ESP_LOGE(TAG, "Invalid content length");
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No content");
+        return ESP_FAIL;
+    }
+
+    // Set socket timeout for large uploads (60 seconds)
+    int recv_timeout = 60;
+    setsockopt(httpd_req_to_sockfd(req), SOL_SOCKET, SO_RCVTIMEO, &recv_timeout, sizeof(recv_timeout));
+
+    // Use larger buffer for better performance
+    char *buf = malloc(4096);
+    if (buf == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate OTA buffer");
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Memory error");
+        return ESP_FAIL;
+    }
+
     int received = 0;
     int total = req->content_len;
     bool is_first = true;
     esp_err_t err = ESP_OK;
+    int timeout_count = 0;
+    int last_progress = -1;
 
     while (received < total) {
-        int ret = httpd_req_recv(req, buf, sizeof(buf));
+        int ret = httpd_req_recv(req, buf, 4096);
         if (ret <= 0) {
-            if (ret == HTTPD_SOCK_ERR_TIMEOUT) continue;
+            if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+                timeout_count++;
+                if (timeout_count > 30) {  // 30 consecutive timeouts = fail
+                    ESP_LOGE(TAG, "OTA receive timeout after %d bytes", received);
+                    err = ESP_FAIL;
+                    break;
+                }
+                vTaskDelay(pdMS_TO_TICKS(100));  // Small delay before retry
+                continue;
+            }
+            ESP_LOGE(TAG, "OTA receive error: %d at %d/%d bytes", ret, received, total);
             err = ESP_FAIL;
             break;
         }
 
+        timeout_count = 0;  // Reset timeout counter on successful receive
+
         bool is_last = (received + ret >= total);
         err = ota_handler_gateway_update((uint8_t *)buf, ret, is_first, is_last);
-        if (err != ESP_OK) break;
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "OTA write error at %d bytes: %s", received, esp_err_to_name(err));
+            break;
+        }
 
         received += ret;
         is_first = false;
+
+        // Log progress every 10%
+        int progress = (received * 100) / total;
+        if (progress / 10 != last_progress / 10) {
+            ESP_LOGI(TAG, "OTA progress: %d%% (%d/%d bytes)", progress, received, total);
+            last_progress = progress;
+        }
     }
+
+    free(buf);
 
     if (err == ESP_OK) {
         httpd_resp_sendstr(req, "OK");
@@ -378,6 +423,57 @@ static esp_err_t api_node_ota_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+// POST /api/wifi/credentials - Save WiFi credentials
+static esp_err_t api_wifi_credentials_handler(httpd_req_t *req)
+{
+    char buf[256];
+    int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (received <= 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No body");
+        return ESP_FAIL;
+    }
+    buf[received] = '\0';
+
+    cJSON *json = cJSON_Parse(buf);
+    if (!json) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+
+    cJSON *ssid_item = cJSON_GetObjectItem(json, "ssid");
+    cJSON *password_item = cJSON_GetObjectItem(json, "password");
+
+    if (!ssid_item || !cJSON_IsString(ssid_item)) {
+        cJSON_Delete(json);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing ssid");
+        return ESP_FAIL;
+    }
+
+    const char *ssid = ssid_item->valuestring;
+    const char *password = password_item && cJSON_IsString(password_item) ? password_item->valuestring : "";
+
+    ESP_LOGI(TAG, "Saving WiFi credentials for SSID: %s", ssid);
+    esp_err_t err = wifi_manager_save_credentials(ssid, password);
+
+    cJSON *response = cJSON_CreateObject();
+    if (err == ESP_OK) {
+        cJSON_AddBoolToObject(response, "success", true);
+        cJSON_AddStringToObject(response, "message", "Credentials saved");
+        cJSON_AddStringToObject(response, "ssid", ssid);
+    } else {
+        cJSON_AddBoolToObject(response, "success", false);
+        cJSON_AddStringToObject(response, "error", "Failed to save credentials");
+    }
+
+    char *resp_str = cJSON_PrintUnformatted(response);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, resp_str, strlen(resp_str));
+    free(resp_str);
+    cJSON_Delete(response);
+    cJSON_Delete(json);
+    return ESP_OK;
+}
+
 // ============== URI Definitions ==============
 static const httpd_uri_t uri_root = {
     .uri = "/",
@@ -433,14 +529,22 @@ static const httpd_uri_t uri_node_ota_start = {
     .handler = api_node_ota_start_handler,
 };
 
+static const httpd_uri_t uri_api_wifi_credentials = {
+    .uri = "/api/wifi/credentials",
+    .method = HTTP_POST,
+    .handler = api_wifi_credentials_handler,
+};
+
 // ============== Public Functions ==============
 esp_err_t webserver_init(void)
 {
     ESP_LOGI(TAG, "Starting HTTP server");
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 12;
-    config.stack_size = 8192;
+    config.max_uri_handlers = 14;
+    config.stack_size = 10240;  // Increased for OTA operations
+    config.recv_wait_timeout = 30;  // 30 seconds receive timeout
+    config.send_wait_timeout = 30;  // 30 seconds send timeout
     config.uri_match_fn = httpd_uri_match_wildcard;
 
     esp_err_t ret = httpd_start(&s_server, &config);
@@ -459,6 +563,7 @@ esp_err_t webserver_init(void)
     httpd_register_uri_handler(s_server, &uri_node_ota_status);
     httpd_register_uri_handler(s_server, &uri_node_ota);
     httpd_register_uri_handler(s_server, &uri_node_ota_start);
+    httpd_register_uri_handler(s_server, &uri_api_wifi_credentials);
 
     ESP_LOGI(TAG, "HTTP server started on port 80");
     return ESP_OK;

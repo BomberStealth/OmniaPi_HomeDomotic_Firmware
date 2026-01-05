@@ -152,13 +152,11 @@ esp_err_t eth_manager_init(void)
 
     // Configure MAC
     eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
-    mac_config.smi_mdc_gpio_num = ETH_PHY_MDC_GPIO;
-    mac_config.smi_mdio_gpio_num = ETH_PHY_MDIO_GPIO;
 
     // Configure ESP32 internal EMAC
     eth_esp32_emac_config_t emac_config = ETH_ESP32_EMAC_DEFAULT_CONFIG();
-    emac_config.smi_mdc_gpio_num = ETH_PHY_MDC_GPIO;
-    emac_config.smi_mdio_gpio_num = ETH_PHY_MDIO_GPIO;
+    emac_config.smi_gpio.mdc_num = ETH_PHY_MDC_GPIO;
+    emac_config.smi_gpio.mdio_num = ETH_PHY_MDIO_GPIO;
     emac_config.clock_config.rmii.clock_mode = EMAC_CLK_EXT_IN;
     emac_config.clock_config.rmii.clock_gpio = EMAC_CLK_IN_GPIO;
 

@@ -29,4 +29,6 @@ idf_component_register(
         spiffs
         app_update
         json
+    PRIV_REQUIRES
+        esp_driver_gpio
 )
