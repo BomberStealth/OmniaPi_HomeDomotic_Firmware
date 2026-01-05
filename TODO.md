@@ -1,90 +1,98 @@
 # OmniaPi Home Domotic - TODO
 
+**Ultimo aggiornamento:** 5 Gennaio 2025
+
+---
+
 ## ✅ COMPLETATE
 
-### Firmware
-- [x] Node ESP-IDF (boot senza USB)
-- [x] Gateway ESP-IDF (migrazione da Arduino)
-- [x] Comunicazione ESP-NOW Gateway ↔ Node
-- [x] MQTT Gateway ↔ Backend
-- [x] Web UI Gateway locale (controllo relay, stato nodi)
-- [x] Gateway OTA via HTTP
-- [x] Node OTA via ESP-NOW
+### Firmware Gateway (WT32-ETH01)
+- [x] Migrazione a ESP-IDF puro (da Arduino)
+- [x] Ethernet LAN8720 + WiFi dual-stack con failover
+- [x] ESP-NOW master
+- [x] MQTT comunicazione con Backend
+- [x] Web UI locale (porta 80)
+- [x] OTA firmware via HTTP
+- [x] OTA Node via ESP-NOW
+- [x] NVS per credenziali WiFi
+- [x] Endpoint POST /api/wifi/credentials
 
-### Backend
-- [x] API REST OmniaPi (/api/omniapi/gateway, /api/omniapi/nodes, /api/omniapi/command)
+### Firmware Node (ESP32-C3)
+- [x] ESP-NOW slave
+- [x] Controllo 2 relay
+- [x] LED status patterns
+- [x] Boot senza USB
+
+### Backend (Express.js)
+- [x] API REST completa (Auth, Impianti, Stanze, Dispositivi, Scene)
+- [x] CRUD Dispositivi OmniaPi (registra, rinomina, assegna stanza, elimina)
+- [x] Cascade delete - eliminazione dispositivo aggiorna scene automaticamente ✅ VERIFICATO
+- [x] Auto-discovery nodi ESP-NOW ✅ VERIFICATO
+- [x] Scene con scheduling (time-based, sun-based)
 - [x] Handler MQTT per topic OmniaPi
-- [x] WebSocket events per aggiornamenti real-time
+- [x] WebSocket events real-time
 
-### Frontend
-- [x] Pagina /omniapi con stato Gateway e controllo Nodi
-- [x] Toggle relay funzionanti
+### Frontend (React)
+- [x] Pagine: Auth, Dashboard, Impianti, Stanze, Dispositivi, Scene, Impostazioni
+- [x] Wizard "Aggiungi Dispositivo" con auto-discovery ✅ VERIFICATO
+- [x] Rinomina dispositivo
+- [x] Assegna dispositivo a stanza
+- [x] Elimina dispositivo (cascade delete automatico)
+- [x] UI Modifica Scene (aggiungere/rimuovere dispositivi)
+- [x] Sezione Impostazioni (Profilo, DispositiviConnessi, Guida, InfoApp)
 - [x] Aggiornamento real-time via WebSocket
 
 ---
 
-## 🔧 DA FARE - PRIORITÀ ALTA
+## ❌ DA FARE
 
-### 1. Integrazione Dispositivi ESP-NOW nel sistema principale
-- [ ] **BE**: Salvare nodi ESP-NOW nel database (come dispositivi)
-- [ ] **BE**: API per rinominare nodo (nome friendly)
-- [ ] **BE**: API per assegnare nodo a stanza
-- [ ] **BE**: API per eliminare nodo (con cascade delete da scene/stanze)
-- [ ] **FE**: Mostrare nodi ESP-NOW in sezione "Dispositivi"
-- [ ] **FE**: Wizard "Aggiungi Dispositivo" per nodi ESP-NOW
-- [ ] **FE**: Rinomina dispositivo
-- [ ] **FE**: Sposta dispositivo tra stanze
+### Priorità Media - Firmware Node
 
-### 2. Fix Scene
-- [ ] **BE**: Cascade delete - rimuovere dispositivo da scene quando eliminato
-- [ ] **BE**: Cascade delete - rimuovere dispositivo da stanze quando eliminato
-- [ ] **BE**: API per modificare scene (aggiungere/rimuovere dispositivi)
-- [ ] **FE**: UI per modificare scene esistenti
-- [ ] **FE**: Aggiornare conteggio dispositivi in tempo reale
-
-### 3. Sezione Impostazioni
-- [ ] **FE**: Dispositivi Connessi - lista sessioni attive utente
-- [ ] **FE**: Notifiche - configurazione push notifications
-- [ ] **FE**: Guida - pagina help/tutorial
-- [ ] **FE**: Informazioni - versione app, credits, contatti
-
----
-
-## 🔧 DA FARE - PRIORITÀ MEDIA
-
-### 4. Firmware - Pulsante Fisico e LED
+#### 1. Pulsante Fisico
 - [ ] GPIO pulsante con debounce
-- [ ] Toggle relay immediato (funzionamento offline)
-- [ ] LED stato (lampeggio patterns)
-- [ ] Salvataggio stato relay in NVS
+- [ ] Toggle relay immediato (funziona offline)
+- [ ] Long-press per reset (opzionale)
 
-### 5. Auto-Discovery e Pairing
-- [ ] Gateway scan automatico nuovi nodi
-- [ ] Workflow pairing (conferma da app)
-- [ ] Assegnazione ID univoco
+#### 2. Persistenza Stato Relay (NVS)
+- [ ] Salvare stato relay in NVS quando cambia
+- [ ] Ripristinare stato relay al boot dopo blackout
+- [ ] ⚠️ DA TESTARE A CASA
 
-### 6. Sicurezza
-- [ ] Password Web UI Gateway
-- [ ] Whitelist MAC addresses
-- [ ] Crittografia ESP-NOW (opzionale)
+### Priorità Bassa - Sicurezza
+
+#### 3. Sicurezza Web UI Gateway
+- [ ] Password per accesso Web UI locale
+- [ ] Salvataggio password in NVS
+
+#### 4. Sicurezza ESP-NOW (opzionale)
+- [ ] MAC Whitelist
+- [ ] Crittografia ESP-NOW
 
 ---
 
-## 🔧 DA FARE - PRIORITÀ BASSA
+## 🔮 FUTURO (Nice to Have)
 
-### 7. Watchdog e Recovery
-- [ ] Reboot automatico se bloccato
-- [ ] Logging errori persistente
-- [ ] Heartbeat monitoring
+- [ ] OmniaPi Switch (PCB dedicato)
+- [ ] OmniaPi Dimmer (PWM per LED)
+- [ ] OmniaPi Sensor (temp/umidità/lux)
+- [ ] OmniaPi Shutter (tapparelle)
+- [ ] Matter/Thread bridge
+- [ ] App Mobile nativa
 
-### 8. Tipi Dispositivo Aggiuntivi
-- [ ] Dimmer (PWM)
-- [ ] Sensore PIR
-- [ ] Sensore temperatura/umidità
-- [ ] Tapparelle
+---
 
-### 9. Wizard Installatore
-- [ ] Setup iniziale guidato
-- [ ] Configurazione WiFi
-- [ ] Pairing dispositivi step-by-step
-- [ ] QR code per pairing rapido
+## 📋 Hardware Confermato
+
+| Componente | Modello |
+|------------|---------|
+| Gateway | WT32-ETH01 |
+| Node | ESP32-C3 SuperMini |
+| Alimentazione | HLK-PM01 (220V→5V) |
+| Relè | GTIWUNG 2ch 5V |
+
+---
+
+## 📝 Note
+
+- **Versione Frontend:** v1.2.0
+- **Versione Firmware:** 1.5.0-idf (da aggiornare a 1.6.0)
