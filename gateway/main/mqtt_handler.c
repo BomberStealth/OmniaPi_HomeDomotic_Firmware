@@ -7,6 +7,7 @@
 #include "node_manager.h"
 #include "espnow_master.h"
 #include "wifi_manager.h"
+#include "eth_manager.h"
 #include <string.h>
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
@@ -111,16 +112,39 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
     }
 }
 
+// ============== LWT Message Buffer ==============
+static char s_lwt_message[64] = {0};
+
 // ============== Public Functions ==============
 esp_err_t mqtt_handler_init(void)
 {
     ESP_LOGI(TAG, "Initializing MQTT Handler");
+
+    // Get gateway MAC for LWT message
+    char mac_str[18] = "00:00:00:00:00:00";
+    eth_manager_get_mac(mac_str, sizeof(mac_str));
+
+    // Build LWT message: {"mac":"XX:XX:XX:XX:XX:XX","offline":true}
+    snprintf(s_lwt_message, sizeof(s_lwt_message),
+             "{\"mac\":\"%s\",\"offline\":true}", mac_str);
+
+    ESP_LOGI(TAG, "LWT configured: %s -> %s", MQTT_TOPIC_LWT, s_lwt_message);
 
     esp_mqtt_client_config_t mqtt_cfg = {
         .broker.address.uri = MQTT_BROKER_URI,
         .credentials.client_id = MQTT_CLIENT_ID,
         .network.reconnect_timeout_ms = 5000,
         .buffer.size = 1024,
+        // Session configuration
+        .session.keepalive = 30,  // 30 seconds keep-alive for faster LWT detection
+        // Last Will and Testament configuration
+        .session.last_will = {
+            .topic = MQTT_TOPIC_LWT,
+            .msg = s_lwt_message,
+            .msg_len = strlen(s_lwt_message),
+            .qos = 1,
+            .retain = false,
+        },
     };
 
     s_mqtt_client = esp_mqtt_client_init(&mqtt_cfg);

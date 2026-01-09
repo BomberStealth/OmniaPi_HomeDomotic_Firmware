@@ -23,6 +23,7 @@ extern "C" {
 #define MQTT_TOPIC_NODES        "omniapi/gateway/nodes"
 #define MQTT_TOPIC_COMMAND      "omniapi/gateway/command"
 #define MQTT_TOPIC_NODE_PREFIX  "omniapi/gateway/node/"
+#define MQTT_TOPIC_LWT          "omniapi/gateway/lwt"
 
 /**
  * Initialize MQTT client
