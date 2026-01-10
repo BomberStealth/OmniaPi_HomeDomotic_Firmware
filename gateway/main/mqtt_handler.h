@@ -15,7 +15,7 @@ extern "C" {
 #endif
 
 // ============== MQTT Configuration ==============
-#define MQTT_BROKER_URI         "mqtt://192.168.1.11:1883"
+#define MQTT_BROKER_URI         "mqtt://192.168.1.252:1883"
 #define MQTT_CLIENT_ID          "omniapi-gateway"
 
 // Topics

@@ -9,7 +9,7 @@ CONFIG_ESP_MAXIMUM_RETRY=10
 CONFIG_ESP_NOW_ENABLE=y
 
 # ============== MQTT ==============
-CONFIG_MQTT_BROKER_URL="mqtt://192.168.1.11:1883"
+CONFIG_MQTT_BROKER_URL="mqtt://192.168.1.252:1883"
 
 # ============== HTTP Server ==============
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024

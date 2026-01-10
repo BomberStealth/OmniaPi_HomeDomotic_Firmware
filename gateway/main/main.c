@@ -38,7 +38,7 @@
 
 static const char *TAG = "main";
 
-#define FIRMWARE_VERSION "1.6.0-idf"
+#define FIRMWARE_VERSION "1.7.0-idf"
 
 // Task intervals
 #define HEARTBEAT_INTERVAL_MS   3000    // ESP-NOW heartbeat every 3s
@@ -280,7 +280,7 @@ static esp_err_t start_services(const char *ip_str)
     printf("  GATEWAY READY!\n");
     printf("  Network: %s\n", network_mode_to_str(s_network_mode));
     printf("  Web UI:  http://%s\n", ip_str);
-    printf("  MQTT:    mqtt://192.168.1.11:1883\n");
+    printf("  MQTT:    mqtt://192.168.1.252:1883\n");
     printf("  Backend: http://192.168.1.253:3000\n");
     if (s_network_mode == NETWORK_MODE_ETH && wifi_manager_has_credentials()) {
         printf("  WiFi:    Backup ready\n");

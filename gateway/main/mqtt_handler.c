@@ -19,7 +19,7 @@
 
 static const char *TAG = "mqtt_handler";
 
-#define FIRMWARE_VERSION "1.5.0-idf"
+#define FIRMWARE_VERSION "1.7.0-idf"
 
 // MQTT client handle
 static esp_mqtt_client_handle_t s_mqtt_client = NULL;
