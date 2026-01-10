@@ -45,6 +45,29 @@ static void espnow_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t *
     ESP_LOGD(TAG, "RX from %s type=0x%02X len=%d rssi=%d", mac_str, msg_type, len, rssi);
 
     switch (msg_type) {
+        case MSG_DISCOVERY: {
+            // Node is scanning for gateway - respond with current channel
+            uint8_t primary_channel;
+            wifi_second_chan_t second;
+            esp_wifi_get_channel(&primary_channel, &second);
+
+            // Add peer if not exists
+            esp_now_peer_info_t peer_info = {
+                .channel = 0,
+                .ifidx = WIFI_IF_STA,
+                .encrypt = false,
+            };
+            memcpy(peer_info.peer_addr, src_addr, 6);
+            esp_now_add_peer(&peer_info);  // Ignore if exists
+
+            // Send discovery ACK with channel
+            uint8_t response[2] = {MSG_DISCOVERY_ACK, primary_channel};
+            esp_now_send(src_addr, response, 2);
+
+            ESP_LOGI(TAG, "DISCOVERY from %s - replied with channel %d", mac_str, primary_channel);
+            break;
+        }
+
         case MSG_HEARTBEAT_ACK:
             // Extract version from response
             if (node_idx >= 0 && len > 2) {

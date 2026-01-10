@@ -38,11 +38,11 @@
 
 static const char *TAG = "main";
 
-#define FIRMWARE_VERSION "1.7.0-idf"
+#define FIRMWARE_VERSION "1.8.0-idf"
 
 // Task intervals
-#define HEARTBEAT_INTERVAL_MS   3000    // ESP-NOW heartbeat every 3s
-#define MQTT_HEARTBEAT_MS       30000   // MQTT status publish every 30s
+#define HEARTBEAT_INTERVAL_MS   1000    // ESP-NOW heartbeat every 1s
+#define MQTT_HEARTBEAT_MS       1000    // MQTT status publish every 1s
 #define STATUS_PRINT_MS         30000   // Serial status every 30s
 
 // Timeouts

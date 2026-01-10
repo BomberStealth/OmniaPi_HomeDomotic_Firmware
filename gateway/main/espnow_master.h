@@ -34,6 +34,10 @@ extern "C" {
 #define CMD_ON              0x01
 #define CMD_TOGGLE          0x02
 
+// Discovery messages (for channel scan)
+#define MSG_DISCOVERY       0x30
+#define MSG_DISCOVERY_ACK   0x31
+
 /**
  * Callback type for node state changes
  * @param node_index Index of the node that changed

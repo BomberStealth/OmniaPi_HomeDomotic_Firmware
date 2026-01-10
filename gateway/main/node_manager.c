@@ -145,8 +145,8 @@ void node_manager_check_online_status(void)
 
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     for (int i = 0; i < s_node_count; i++) {
-        // Mark offline if not seen for 10 seconds
-        if (now - s_nodes[i].last_seen > 10000) {
+        // Mark offline if not seen for 2 seconds
+        if (now - s_nodes[i].last_seen > 2000) {
             if (s_nodes[i].online) {
                 s_nodes[i].online = false;
                 char mac_str[18];
