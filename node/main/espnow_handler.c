@@ -30,7 +30,7 @@ static uint32_t s_ota_received = 0;
 static bool s_ota_in_progress = false;
 
 // Firmware version
-#define FIRMWARE_VERSION "2.6.1"
+#define FIRMWARE_VERSION "2.7.0"
 
 // Gateway MAC address (E8:9F:6D:BB:F8:F8)
 static const uint8_t GATEWAY_MAC[] = {0xe8, 0x9f, 0x6d, 0xbb, 0xf8, 0xf8};

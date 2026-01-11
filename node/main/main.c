@@ -10,12 +10,13 @@
 #include "espnow_handler.h"
 #include "relay_control.h"
 #include "led_status.h"
+#include "button_handler.h"
 
 static const char *TAG = "OMNIAPI_NODE";
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "OmniaPi Node v2.6.0 (ESP-IDF)");
+    ESP_LOGI(TAG, "OmniaPi Node v2.7.0 (ESP-IDF)");
 
     // Init NVS
     esp_err_t ret = nvs_flash_init();
@@ -28,6 +29,7 @@ void app_main(void)
     // Init componenti
     led_status_init();
     relay_control_init();
+    button_handler_init();
 
     // LED pattern: avvio (blink veloce)
     led_blink(3, 100);

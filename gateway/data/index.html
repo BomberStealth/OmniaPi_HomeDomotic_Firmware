@@ -249,10 +249,16 @@
     <script>
         let gwFile = null;
         let currentNodeOtaMac = null;
+        let statusController = null;
+        let nodesController = null;
 
         async function fetchStatus() {
+            if (statusController) statusController.abort();
+            statusController = new AbortController();
+            const timeout = setTimeout(() => statusController.abort(), 4000);
             try {
-                const r = await fetch('/api/status');
+                const r = await fetch('/api/status', { signal: statusController.signal });
+                clearTimeout(timeout);
                 const d = await r.json();
 
                 document.getElementById('s-conn').textContent = d.connected ? 'OK' : 'DISC';
@@ -269,13 +275,17 @@
                 const m = Math.floor((up % 3600) / 60);
                 document.getElementById('s-uptime').textContent = h + 'h ' + m + 'm';
             } catch (e) {
-                console.error('Status error:', e);
+                if (e.name !== 'AbortError') console.error('Status error:', e);
             }
         }
 
         async function fetchNodes() {
+            if (nodesController) nodesController.abort();
+            nodesController = new AbortController();
+            const timeout = setTimeout(() => nodesController.abort(), 4000);
             try {
-                const r = await fetch('/api/nodes');
+                const r = await fetch('/api/nodes', { signal: nodesController.signal });
+                clearTimeout(timeout);
                 const d = await r.json();
                 const nodes = d.nodes || [];
                 const container = document.getElementById('nodes-list');
@@ -320,7 +330,7 @@
                     </div>`;
                 }).join('');
             } catch (e) {
-                console.error('Nodes error:', e);
+                if (e.name !== 'AbortError') console.error('Nodes error:', e);
             }
         }
 

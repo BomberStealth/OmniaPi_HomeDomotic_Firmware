@@ -18,7 +18,7 @@
 static const char *TAG = "backend_client";
 
 // Firmware version (from main.c)
-#define FIRMWARE_VERSION "1.8.0-idf"
+#define FIRMWARE_VERSION "1.8.7-idf"
 
 // Registration retry interval (30 seconds)
 #define REGISTRATION_RETRY_MS 30000

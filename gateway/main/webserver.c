@@ -19,7 +19,7 @@
 
 static const char *TAG = "webserver";
 
-#define FIRMWARE_VERSION "1.8.0-idf"
+#define FIRMWARE_VERSION "1.8.7-idf"
 
 // HTTP server handle
 static httpd_handle_t s_server = NULL;
@@ -78,11 +78,18 @@ static esp_err_t api_nodes_handler(httpd_req_t *req)
     // Update online status before returning
     node_manager_check_online_status();
 
-    char buffer[2048];
-    node_manager_get_nodes_json(buffer, sizeof(buffer));
+    // Use heap to save stack space
+    char *buffer = malloc(2048);
+    if (buffer == NULL) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Memory error");
+        return ESP_FAIL;
+    }
+
+    node_manager_get_nodes_json(buffer, 2048);
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, buffer, strlen(buffer));
+    free(buffer);
     return ESP_OK;
 }
 
@@ -356,6 +363,10 @@ static esp_err_t api_node_ota_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
+    // Set socket timeout for large uploads (120 seconds for SPIFFS)
+    int recv_timeout = 120;
+    setsockopt(httpd_req_to_sockfd(req), SOL_SOCKET, SO_RCVTIMEO, &recv_timeout, sizeof(recv_timeout));
+
     // Start streaming write to SPIFFS
     esp_err_t err = ota_handler_node_fw_begin();
     if (err != ESP_OK) {
@@ -370,19 +381,47 @@ static esp_err_t api_node_ota_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
-    // Receive and write firmware data in chunks
-    char buf[1024];
+    // Allocate buffer on heap to save stack space
+    char *buf = malloc(2048);
+    if (buf == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate node OTA buffer");
+        ota_handler_node_fw_end(0);
+        cJSON *response = cJSON_CreateObject();
+        cJSON_AddBoolToObject(response, "success", false);
+        cJSON_AddStringToObject(response, "error", "Memory error");
+        char *resp_str = cJSON_PrintUnformatted(response);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, resp_str, strlen(resp_str));
+        free(resp_str);
+        cJSON_Delete(response);
+        return ESP_OK;
+    }
+
     int received = 0;
     int total = req->content_len;
     bool write_error = false;
+    int timeout_count = 0;
+    int last_progress = -1;
 
     while (received < total) {
-        int ret = httpd_req_recv(req, buf, sizeof(buf));
+        int ret = httpd_req_recv(req, buf, 2048);
         if (ret <= 0) {
-            if (ret == HTTPD_SOCK_ERR_TIMEOUT) continue;
+            if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+                timeout_count++;
+                if (timeout_count > 120) {  // 120 consecutive timeouts = fail
+                    ESP_LOGE(TAG, "Node OTA receive timeout after %d bytes", received);
+                    write_error = true;
+                    break;
+                }
+                vTaskDelay(pdMS_TO_TICKS(50));  // Small delay before retry
+                continue;
+            }
+            ESP_LOGE(TAG, "Node OTA receive error: %d", ret);
             write_error = true;
             break;
         }
+
+        timeout_count = 0;  // Reset on successful receive
 
         err = ota_handler_node_fw_write((uint8_t *)buf, ret);
         if (err != ESP_OK) {
@@ -391,7 +430,19 @@ static esp_err_t api_node_ota_handler(httpd_req_t *req)
         }
 
         received += ret;
+
+        // Yield to prevent watchdog and let other tasks run
+        vTaskDelay(pdMS_TO_TICKS(1));
+
+        // Log progress every 10%
+        int progress = (received * 100) / total;
+        if (progress / 10 > last_progress / 10) {
+            ESP_LOGI(TAG, "Node OTA upload: %d%% (%d/%d)", progress, received, total);
+            last_progress = progress;
+        }
     }
+
+    free(buf);
 
     // End streaming write
     if (!write_error) {
@@ -541,10 +592,8 @@ esp_err_t webserver_init(void)
     ESP_LOGI(TAG, "Starting HTTP server");
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 14;
-    config.stack_size = 10240;  // Increased for OTA operations
-    config.recv_wait_timeout = 30;  // 30 seconds receive timeout
-    config.send_wait_timeout = 30;  // 30 seconds send timeout
+    config.max_uri_handlers = 20;
+    config.stack_size = 16384;  // Increased for large handlers
     config.uri_match_fn = httpd_uri_match_wildcard;
 
     esp_err_t ret = httpd_start(&s_server, &config);

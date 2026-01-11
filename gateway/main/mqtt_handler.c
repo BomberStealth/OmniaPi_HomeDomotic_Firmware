@@ -14,12 +14,16 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_system.h"
 #include "mqtt_client.h"
 #include "cJSON.h"
 
 static const char *TAG = "mqtt_handler";
 
-#define FIRMWARE_VERSION "1.8.0-idf"
+#define FIRMWARE_VERSION "1.8.7-idf"
+
+// Gateway command topic for reboot
+#define MQTT_TOPIC_GW_COMMAND "omniapi/gateway/command"
 
 // MQTT client handle
 static esp_mqtt_client_handle_t s_mqtt_client = NULL;
@@ -42,9 +46,10 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
             ESP_LOGI(TAG, "MQTT connected");
             s_connected = true;
 
-            // Subscribe to command topic
+            // Subscribe to command topics
             esp_mqtt_client_subscribe(s_mqtt_client, MQTT_TOPIC_COMMAND, 0);
-            ESP_LOGI(TAG, "Subscribed to: %s", MQTT_TOPIC_COMMAND);
+            esp_mqtt_client_subscribe(s_mqtt_client, MQTT_TOPIC_GW_COMMAND, 0);
+            ESP_LOGI(TAG, "Subscribed to: %s, %s", MQTT_TOPIC_COMMAND, MQTT_TOPIC_GW_COMMAND);
 
             // Publish initial status
             mqtt_handler_publish_status();
@@ -61,7 +66,20 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
             ESP_LOGI(TAG, "MQTT data received on topic: %.*s",
                      event->topic_len, event->topic);
 
-            // Check if it's a command
+            // Check for gateway reboot command (safety net)
+            if (strncmp(event->topic, MQTT_TOPIC_GW_COMMAND, event->topic_len) == 0) {
+                char cmd_buf[64] = {0};
+                int cmd_len = event->data_len < 63 ? event->data_len : 63;
+                memcpy(cmd_buf, event->data, cmd_len);
+
+                if (strstr(cmd_buf, "reboot") != NULL) {
+                    ESP_LOGW(TAG, ">>> REBOOT COMMAND RECEIVED VIA MQTT <<<");
+                    vTaskDelay(pdMS_TO_TICKS(1000));
+                    esp_restart();
+                }
+            }
+
+            // Check if it's a node command
             if (strncmp(event->topic, MQTT_TOPIC_COMMAND, event->topic_len) == 0) {
                 // Parse JSON payload
                 char *payload = malloc(event->data_len + 1);
@@ -204,11 +222,15 @@ void mqtt_handler_publish_all_nodes(void)
 {
     if (!s_connected || s_mqtt_client == NULL) return;
 
-    char buffer[2048];
-    node_manager_get_nodes_json(buffer, sizeof(buffer));
+    // Use heap to save stack space
+    char *buffer = malloc(2048);
+    if (buffer == NULL) return;
+
+    node_manager_get_nodes_json(buffer, 2048);
 
     esp_mqtt_client_publish(s_mqtt_client, MQTT_TOPIC_NODES, buffer, 0, 0, 0);
     ESP_LOGI(TAG, "Published all nodes (%d)", node_manager_get_count());
+    free(buffer);
 }
 
 void mqtt_handler_publish_node_state(int node_index)
