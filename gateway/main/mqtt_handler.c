@@ -49,7 +49,8 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
             // Subscribe to command topics
             esp_mqtt_client_subscribe(s_mqtt_client, MQTT_TOPIC_COMMAND, 0);
             esp_mqtt_client_subscribe(s_mqtt_client, MQTT_TOPIC_GW_COMMAND, 0);
-            ESP_LOGI(TAG, "Subscribed to: %s, %s", MQTT_TOPIC_COMMAND, MQTT_TOPIC_GW_COMMAND);
+            esp_mqtt_client_subscribe(s_mqtt_client, MQTT_TOPIC_LED_COMMAND, 0);  // LED Strip
+            ESP_LOGI(TAG, "Subscribed to: %s, %s, %s", MQTT_TOPIC_COMMAND, MQTT_TOPIC_GW_COMMAND, MQTT_TOPIC_LED_COMMAND);
 
             // Publish initial status
             mqtt_handler_publish_status();
@@ -79,7 +80,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
                 }
             }
 
-            // Check if it's a node command
+            // Check if it's a node command (RELAY - existing)
             if (strncmp(event->topic, MQTT_TOPIC_COMMAND, event->topic_len) == 0) {
                 // Parse JSON payload
                 char *payload = malloc(event->data_len + 1);
@@ -115,6 +116,118 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
                         cJSON_Delete(json);
                     } else {
                         ESP_LOGW(TAG, "Failed to parse command JSON");
+                    }
+                    free(payload);
+                }
+            }
+
+            // Check if it's a LED command (LED_STRIP - NEW)
+            if (strncmp(event->topic, MQTT_TOPIC_LED_COMMAND, event->topic_len) == 0) {
+                char *payload = malloc(event->data_len + 1);
+                if (payload) {
+                    memcpy(payload, event->data, event->data_len);
+                    payload[event->data_len] = '\0';
+
+                    cJSON *json = cJSON_Parse(payload);
+                    if (json) {
+                        cJSON *mac_json = cJSON_GetObjectItem(json, "mac");
+                        cJSON *action_json = cJSON_GetObjectItem(json, "action");
+
+                        if (mac_json && action_json && cJSON_IsString(mac_json) && cJSON_IsString(action_json)) {
+                            uint8_t mac[6];
+                            if (node_manager_mac_from_string(mac_json->valuestring, mac)) {
+                                const char *action_str = action_json->valuestring;
+                                uint8_t params[6] = {0};
+                                uint8_t params_len = 0;
+                                uint8_t led_action = 0;
+
+                                if (strcmp(action_str, "on") == 0) {
+                                    led_action = LED_ACTION_ON;
+                                } else if (strcmp(action_str, "off") == 0) {
+                                    led_action = LED_ACTION_OFF;
+                                } else if (strcmp(action_str, "set_color") == 0) {
+                                    led_action = LED_ACTION_SET_COLOR;
+                                    cJSON *r = cJSON_GetObjectItem(json, "r");
+                                    cJSON *g = cJSON_GetObjectItem(json, "g");
+                                    cJSON *b = cJSON_GetObjectItem(json, "b");
+                                    if (r && g && b) {
+                                        params[0] = (uint8_t)r->valueint;
+                                        params[1] = (uint8_t)g->valueint;
+                                        params[2] = (uint8_t)b->valueint;
+                                        params_len = 3;
+                                    }
+                                } else if (strcmp(action_str, "set_brightness") == 0) {
+                                    led_action = LED_ACTION_SET_BRIGHT;
+                                    cJSON *value = cJSON_GetObjectItem(json, "value");
+                                    if (value) {
+                                        params[0] = (uint8_t)value->valueint;
+                                        params_len = 1;
+                                    }
+                                } else if (strcmp(action_str, "set_effect") == 0) {
+                                    led_action = LED_ACTION_SET_EFFECT;
+                                    cJSON *effect = cJSON_GetObjectItem(json, "effect");
+                                    if (effect) {
+                                        params[0] = (uint8_t)effect->valueint;
+                                        params_len = 1;
+                                    }
+                                } else if (strcmp(action_str, "set_speed") == 0) {
+                                    led_action = LED_ACTION_SET_SPEED;
+                                    cJSON *speed = cJSON_GetObjectItem(json, "speed");
+                                    if (speed) {
+                                        params[0] = (uint8_t)speed->valueint;
+                                        params_len = 1;
+                                    }
+                                } else if (strcmp(action_str, "set_num_leds") == 0) {
+                                    led_action = LED_ACTION_SET_NUM_LEDS;
+                                    cJSON *num_leds = cJSON_GetObjectItem(json, "num_leds");
+                                    if (num_leds) {
+                                        uint16_t num = (uint16_t)num_leds->valueint;
+                                        params[0] = num & 0xFF;         // low byte
+                                        params[1] = (num >> 8) & 0xFF;  // high byte
+                                        params_len = 2;
+                                    }
+                                } else if (strcmp(action_str, "set_custom_effect") == 0) {
+                                    // Custom rainbow with 3 colors
+                                    led_action = LED_ACTION_CUSTOM_EFFECT;
+                                    cJSON *colors = cJSON_GetObjectItem(json, "colors");
+                                    if (colors && cJSON_IsArray(colors) && cJSON_GetArraySize(colors) == 3) {
+                                        // Build custom effect message: need 9 bytes for 3 RGB colors
+                                        // We'll use extended send function
+                                        uint8_t custom_params[9] = {0};
+                                        for (int i = 0; i < 3; i++) {
+                                            cJSON *color = cJSON_GetArrayItem(colors, i);
+                                            if (color) {
+                                                cJSON *cr = cJSON_GetObjectItem(color, "r");
+                                                cJSON *cg = cJSON_GetObjectItem(color, "g");
+                                                cJSON *cb = cJSON_GetObjectItem(color, "b");
+                                                if (cr) custom_params[i*3] = (uint8_t)cr->valueint;
+                                                if (cg) custom_params[i*3+1] = (uint8_t)cg->valueint;
+                                                if (cb) custom_params[i*3+2] = (uint8_t)cb->valueint;
+                                            }
+                                        }
+                                        ESP_LOGI(TAG, "Custom effect colors: RGB1=%d,%d,%d RGB2=%d,%d,%d RGB3=%d,%d,%d",
+                                                 custom_params[0], custom_params[1], custom_params[2],
+                                                 custom_params[3], custom_params[4], custom_params[5],
+                                                 custom_params[6], custom_params[7], custom_params[8]);
+                                        // Send with extended params (9 bytes)
+                                        espnow_master_send_led_command_extended(mac, led_action, custom_params, 9);
+                                        cJSON_Delete(json);
+                                        free(payload);
+                                        break;  // Exit early, already sent
+                                    }
+                                }
+
+                                ESP_LOGI(TAG, "LED command: %s -> %s", mac_json->valuestring, action_str);
+                                espnow_master_send_led_command(mac, led_action, params, params_len);
+                            } else {
+                                ESP_LOGW(TAG, "Invalid MAC in LED command: %s", mac_json->valuestring);
+                            }
+                        } else {
+                            ESP_LOGW(TAG, "Missing fields in LED command JSON");
+                        }
+                        cJSON_Delete(json);
+                    } else {
+                        ESP_LOGW(TAG, "Failed to parse LED command JSON");
                     }
                     free(payload);
                 }
@@ -259,6 +372,31 @@ void mqtt_handler_publish_node_state(int node_index)
 
         esp_mqtt_client_publish(s_mqtt_client, topic, payload, 0, 0, 0);
         ESP_LOGI(TAG, "Published node state: %s", mac_str);
+        free(payload);
+    }
+    cJSON_Delete(json);
+}
+
+void mqtt_publish_led_state(const uint8_t *mac, const led_state_t *state)
+{
+    if (!s_connected || s_mqtt_client == NULL || mac == NULL || state == NULL) return;
+
+    char mac_str[18];
+    node_manager_mac_to_string(mac, mac_str);
+
+    cJSON *json = cJSON_CreateObject();
+    cJSON_AddStringToObject(json, "mac", mac_str);
+    cJSON_AddBoolToObject(json, "power", state->power);
+    cJSON_AddNumberToObject(json, "r", state->r);
+    cJSON_AddNumberToObject(json, "g", state->g);
+    cJSON_AddNumberToObject(json, "b", state->b);
+    cJSON_AddNumberToObject(json, "brightness", state->brightness);
+    cJSON_AddNumberToObject(json, "effect", state->effect);
+
+    char *payload = cJSON_PrintUnformatted(json);
+    if (payload) {
+        esp_mqtt_client_publish(s_mqtt_client, MQTT_TOPIC_LED_STATE, payload, 0, 0, 0);
+        ESP_LOGI(TAG, "Published LED state: %s", mac_str);
         free(payload);
     }
     cJSON_Delete(json);

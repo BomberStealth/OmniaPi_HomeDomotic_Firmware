@@ -38,6 +38,20 @@ extern "C" {
 #define MSG_DISCOVERY       0x30
 #define MSG_DISCOVERY_ACK   0x31
 
+// LED Strip control messages (0x40 range) - NEW
+#define MSG_LED_COMMAND     0x40
+#define MSG_LED_ACK         0x41
+
+// LED Actions
+#define LED_ACTION_OFF          0x00
+#define LED_ACTION_ON           0x01
+#define LED_ACTION_SET_COLOR    0x02
+#define LED_ACTION_SET_BRIGHT   0x03
+#define LED_ACTION_SET_EFFECT   0x04
+#define LED_ACTION_SET_SPEED    0x05
+#define LED_ACTION_SET_NUM_LEDS     0x06
+#define LED_ACTION_CUSTOM_EFFECT    0x07  // Custom 3-color rainbow
+
 /**
  * Callback type for node state changes
  * @param node_index Index of the node that changed
@@ -89,6 +103,26 @@ uint32_t espnow_master_get_rx_count(void);
  * @return Message count
  */
 uint32_t espnow_master_get_tx_count(void);
+
+/**
+ * Send LED command to a LED Strip node
+ * @param mac Target MAC address
+ * @param action LED action (LED_ACTION_ON, LED_ACTION_SET_COLOR, etc.)
+ * @param params Optional parameters (RGB values, brightness, etc.)
+ * @param params_len Length of params array (max 6)
+ * @return ESP_OK on success
+ */
+esp_err_t espnow_master_send_led_command(const uint8_t *mac, uint8_t action, const uint8_t *params, uint8_t params_len);
+
+/**
+ * Send LED command with extended params (for custom effect with 9 bytes)
+ * @param mac Target MAC address
+ * @param action LED action
+ * @param params Parameters array
+ * @param params_len Length of params array (max 12)
+ * @return ESP_OK on success
+ */
+esp_err_t espnow_master_send_led_command_extended(const uint8_t *mac, uint8_t action, const uint8_t *params, uint8_t params_len);
 
 #ifdef __cplusplus
 }

@@ -5,6 +5,7 @@
 
 #include "espnow_master.h"
 #include "node_manager.h"
+#include "mqtt_handler.h"
 #include "ota_handler.h"
 #include <string.h>
 #include "freertos/FreeRTOS.h"
@@ -69,8 +70,16 @@ static void espnow_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t *
         }
 
         case MSG_HEARTBEAT_ACK:
-            // Extract version from response
+            // Format: [0x02][device_type][version_string...]
             if (node_idx >= 0 && len > 2) {
+                // Extract device type from data[1]
+                uint8_t device_type = data[1];
+                if (device_type == DEVICE_TYPE_LED_STRIP || device_type == DEVICE_TYPE_RELAY) {
+                    node_manager_set_device_type(src_addr, device_type);
+                    ESP_LOGI(TAG, "Node %s device_type: 0x%02X", mac_str, device_type);
+                }
+
+                // Extract version from data[2:]
                 char version[16] = {0};
                 size_t copy_len = (len - 2 < 15) ? len - 2 : 15;
                 memcpy(version, data + 2, copy_len);
@@ -113,15 +122,41 @@ static void espnow_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t *
             ota_handler_on_node_message(src_addr, msg_type, data, len);
             break;
 
+        case MSG_LED_ACK:
+            // LED Strip ACK - Format: [0x41][power][r][g][b][brightness][effect]
+            ESP_LOGI(TAG, "LED ACK from %s", mac_str);
+            if (len >= 7) {
+                // Set device type to LED_STRIP
+                node_manager_set_device_type(src_addr, DEVICE_TYPE_LED_STRIP);
+
+                // Update LED state
+                led_state_t state = {
+                    .power = data[1],
+                    .r = data[2],
+                    .g = data[3],
+                    .b = data[4],
+                    .brightness = data[5],
+                    .effect = data[6]
+                };
+                node_manager_update_led_state(src_addr, &state);
+
+                // Publish to MQTT
+                mqtt_publish_led_state(src_addr, &state);
+
+                ESP_LOGI(TAG, "LED state: power=%d RGB=%d,%d,%d bright=%d effect=%d",
+                         state.power, state.r, state.g, state.b, state.brightness, state.effect);
+            }
+            break;
+
         default:
             ESP_LOGD(TAG, "Unknown message type 0x%02X from %s", msg_type, mac_str);
             break;
     }
 }
 
-static void espnow_send_cb(const wifi_tx_info_t *tx_info, esp_now_send_status_t status)
+static void espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status)
 {
-    (void)tx_info;  // unused
+    (void)mac_addr;  // unused
     s_tx_count++;
     if (status != ESP_NOW_SEND_SUCCESS) {
         ESP_LOGW(TAG, "ESP-NOW send failed");
@@ -220,4 +255,66 @@ uint32_t espnow_master_get_rx_count(void)
 uint32_t espnow_master_get_tx_count(void)
 {
     return s_tx_count;
+}
+
+esp_err_t espnow_master_send_led_command(const uint8_t *mac, uint8_t action, const uint8_t *params, uint8_t params_len)
+{
+    if (mac == NULL) return ESP_ERR_INVALID_ARG;
+    if (params_len > 6) params_len = 6;  // Max 6 param bytes
+
+    // Add peer if not exists
+    esp_now_peer_info_t peer_info = {
+        .channel = 0,
+        .ifidx = WIFI_IF_STA,
+        .encrypt = false,
+    };
+    memcpy(peer_info.peer_addr, mac, 6);
+    esp_now_add_peer(&peer_info);  // Ignore if already exists
+
+    // Build LED command: [MSG_LED_COMMAND][action][params...]
+    uint8_t msg[8] = {0};
+    msg[0] = MSG_LED_COMMAND;
+    msg[1] = action;
+    if (params != NULL && params_len > 0) {
+        memcpy(&msg[2], params, params_len);
+    }
+
+    esp_err_t ret = esp_now_send(mac, msg, 2 + params_len);
+
+    char mac_str[18];
+    node_manager_mac_to_string(mac, mac_str);
+    ESP_LOGI(TAG, "LED command to %s: action=0x%02X params_len=%d", mac_str, action, params_len);
+
+    return ret;
+}
+
+esp_err_t espnow_master_send_led_command_extended(const uint8_t *mac, uint8_t action, const uint8_t *params, uint8_t params_len)
+{
+    if (mac == NULL) return ESP_ERR_INVALID_ARG;
+    if (params_len > 12) params_len = 12;  // Max 12 param bytes for extended
+
+    // Add peer if not exists
+    esp_now_peer_info_t peer_info = {
+        .channel = 0,
+        .ifidx = WIFI_IF_STA,
+        .encrypt = false,
+    };
+    memcpy(peer_info.peer_addr, mac, 6);
+    esp_now_add_peer(&peer_info);  // Ignore if already exists
+
+    // Build LED command: [MSG_LED_COMMAND][action][params...]
+    uint8_t msg[14] = {0};  // 2 header + 12 params max
+    msg[0] = MSG_LED_COMMAND;
+    msg[1] = action;
+    if (params != NULL && params_len > 0) {
+        memcpy(&msg[2], params, params_len);
+    }
+
+    esp_err_t ret = esp_now_send(mac, msg, 2 + params_len);
+
+    char mac_str[18];
+    node_manager_mac_to_string(mac, mac_str);
+    ESP_LOGI(TAG, "LED extended command to %s: action=0x%02X params_len=%d", mac_str, action, params_len);
+
+    return ret;
 }

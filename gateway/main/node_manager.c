@@ -75,6 +75,8 @@ int node_manager_find_or_add(const uint8_t *mac, int8_t rssi)
         s_nodes[idx].relay_states[0] = 0;
         s_nodes[idx].relay_states[1] = 0;
         s_nodes[idx].relay_count = 2;
+        s_nodes[idx].device_type = DEVICE_TYPE_RELAY;  // Default for retrocompatibility
+        memset(&s_nodes[idx].led_state, 0, sizeof(led_state_t));
         s_node_count++;
 
         char mac_str[18];
@@ -205,9 +207,11 @@ int node_manager_get_nodes_json(char *buffer, size_t len)
             snprintf(last_seen_str, sizeof(last_seen_str), "%lum ago", (unsigned long)(ago / 60));
         }
 
+        // Base node info
         written += snprintf(buffer + written, len - written,
             "%s{\"mac\":\"%s\",\"rssi\":%d,\"messages\":%lu,\"online\":%s,"
-            "\"version\":\"%s\",\"relays\":[%d,%d],\"lastSeen\":\"%s\"}",
+            "\"version\":\"%s\",\"relays\":[%d,%d],\"lastSeen\":\"%s\","
+            "\"deviceType\":%d",
             i > 0 ? "," : "",
             mac_str,
             s_nodes[i].rssi,
@@ -216,7 +220,23 @@ int node_manager_get_nodes_json(char *buffer, size_t len)
             s_nodes[i].version,
             s_nodes[i].relay_states[0],
             s_nodes[i].relay_states[1],
-            last_seen_str);
+            last_seen_str,
+            s_nodes[i].device_type);
+
+        // Add LED state for LED_STRIP devices
+        if (s_nodes[i].device_type == DEVICE_TYPE_LED_STRIP) {
+            written += snprintf(buffer + written, len - written,
+                ",\"ledState\":{\"power\":%s,\"r\":%d,\"g\":%d,\"b\":%d,\"brightness\":%d,\"effect\":%d}",
+                s_nodes[i].led_state.power ? "true" : "false",
+                s_nodes[i].led_state.r,
+                s_nodes[i].led_state.g,
+                s_nodes[i].led_state.b,
+                s_nodes[i].led_state.brightness,
+                s_nodes[i].led_state.effect);
+        }
+
+        // Close node object
+        written += snprintf(buffer + written, len - written, "}");
     }
 
     written += snprintf(buffer + written, len - written,
@@ -226,4 +246,38 @@ int node_manager_get_nodes_json(char *buffer, size_t len)
     xSemaphoreGive(s_mutex);
 
     return written;
+}
+
+void node_manager_update_led_state(const uint8_t *mac, const led_state_t *state)
+{
+    if (mac == NULL || state == NULL) return;
+
+    node_info_t *node = node_manager_get_by_mac(mac);
+    if (node && node->device_type == DEVICE_TYPE_LED_STRIP) {
+        xSemaphoreTake(s_mutex, portMAX_DELAY);
+        memcpy(&node->led_state, state, sizeof(led_state_t));
+        xSemaphoreGive(s_mutex);
+
+        char mac_str[18];
+        node_manager_mac_to_string(mac, mac_str);
+        ESP_LOGI(TAG, "LED %s: power=%d RGB=%d,%d,%d bright=%d effect=%d",
+                 mac_str, state->power, state->r, state->g, state->b,
+                 state->brightness, state->effect);
+    }
+}
+
+void node_manager_set_device_type(const uint8_t *mac, uint8_t type)
+{
+    if (mac == NULL) return;
+
+    node_info_t *node = node_manager_get_by_mac(mac);
+    if (node) {
+        xSemaphoreTake(s_mutex, portMAX_DELAY);
+        node->device_type = type;
+        xSemaphoreGive(s_mutex);
+
+        char mac_str[18];
+        node_manager_mac_to_string(mac, mac_str);
+        ESP_LOGI(TAG, "Node %s device_type set to 0x%02X", mac_str, type);
+    }
 }

@@ -180,6 +180,64 @@
             cursor: pointer;
             margin-top: 15px;
         }
+
+        /* LED Strip Controls */
+        .led-controls {
+            padding: 10px 0;
+            border-top: 1px solid rgba(255,255,255,0.05);
+        }
+        .led-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+        }
+        .led-label {
+            font-size: 0.85rem;
+            color: rgba(255,255,255,0.6);
+            min-width: 80px;
+        }
+        .led-type-badge {
+            background: linear-gradient(90deg, #ff6b6b, #feca57);
+            color: #1a1a2e;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            margin-left: 10px;
+        }
+        input[type="color"] {
+            width: 50px;
+            height: 30px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            background: transparent;
+        }
+        input[type="range"] {
+            width: 120px;
+            accent-color: #6ad4a0;
+        }
+        select {
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 6px;
+            padding: 6px 10px;
+            font-size: 0.8rem;
+            cursor: pointer;
+        }
+        select option {
+            background: #1a1a2e;
+            color: #fff;
+        }
+        .color-preview {
+            width: 30px;
+            height: 30px;
+            border-radius: 6px;
+            border: 2px solid rgba(255,255,255,0.3);
+        }
     </style>
 </head>
 <body>
@@ -298,16 +356,56 @@
                 container.innerHTML = nodes.map((n, idx) => {
                     const relays = n.relays || [0, 0];
                     const macId = n.mac.replace(/:/g, '');
-                    return `
-                    <div class="node-card" id="node-${macId}">
-                        <div class="node-header">
-                            <span class="node-mac">${n.mac}</span>
-                            <span class="node-status ${n.online ? 'node-online' : 'node-offline'}">${n.online ? 'Online' : 'Offline'}</span>
-                        </div>
-                        <div class="node-info">
-                            <span>RSSI: ${n.rssi} dBm</span>
-                            <span>Ver: ${n.version || '?'}</span>
-                        </div>
+                    const isLedStrip = n.deviceType === 16; // DEVICE_TYPE_LED_STRIP = 0x10
+
+                    // Build controls based on device type
+                    let controlsHtml = '';
+                    let typeBadge = '';
+
+                    if (isLedStrip) {
+                        // LED STRIP CONTROLS
+                        typeBadge = '<span class="led-type-badge">LED STRIP</span>';
+                        const led = n.ledState || {power: false, r: 0, g: 255, b: 0, brightness: 128, effect: 0};
+                        const colorHex = '#' + (led.r || 0).toString(16).padStart(2,'0') + (led.g || 255).toString(16).padStart(2,'0') + (led.b || 0).toString(16).padStart(2,'0');
+
+                        controlsHtml = `
+                        <div class="led-controls">
+                            <div class="led-row">
+                                <span class="led-label">Power</span>
+                                <button class="btn ${led.power ? 'btn-on' : 'btn-off'} btn-sm" onclick="ledCmd('${n.mac}','on')" ${!n.online ? 'disabled' : ''}>ON</button>
+                                <button class="btn ${!led.power ? 'btn-on' : 'btn-off'} btn-sm" onclick="ledCmd('${n.mac}','off')" ${!n.online ? 'disabled' : ''}>OFF</button>
+                            </div>
+                            <div class="led-row">
+                                <span class="led-label">Color</span>
+                                <input type="color" value="${colorHex}" onchange="ledColor('${n.mac}',this.value)" ${!n.online ? 'disabled' : ''}>
+                                <div class="color-preview" style="background:${colorHex}"></div>
+                            </div>
+                            <div class="led-row">
+                                <span class="led-label">Brightness</span>
+                                <input type="range" min="0" max="255" value="${led.brightness || 128}" onchange="ledBright('${n.mac}',this.value)" ${!n.online ? 'disabled' : ''}>
+                                <span style="font-size:0.8rem;color:rgba(255,255,255,0.5)">${led.brightness || 128}</span>
+                            </div>
+                            <div class="led-row">
+                                <span class="led-label">Effect</span>
+                                <select onchange="ledEffect('${n.mac}',this.value)" ${!n.online ? 'disabled' : ''}>
+                                    <option value="0" ${led.effect===0?'selected':''}>Static</option>
+                                    <option value="1" ${led.effect===1?'selected':''}>Rainbow</option>
+                                    <option value="2" ${led.effect===2?'selected':''}>Breathing</option>
+                                    <option value="3" ${led.effect===3?'selected':''}>Chase</option>
+                                    <option value="4" ${led.effect===4?'selected':''}>Sparkle</option>
+                                    <option value="5" ${led.effect===5?'selected':''}>Fire</option>
+                                </select>
+                            </div>
+                            <div class="led-row">
+                                <span class="led-label">Num LED</span>
+                                <input type="number" id="numled-${macId}" min="1" max="300" value="${led.numLeds || 30}" style="width:70px;background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,255,255,0.2);border-radius:6px;padding:6px;font-size:0.8rem;" ${!n.online ? 'disabled' : ''}>
+                                <button class="btn btn-on btn-sm" onclick="ledNumLeds('${n.mac}','numled-${macId}')" ${!n.online ? 'disabled' : ''}>Applica</button>
+                                <span style="font-size:0.7rem;color:rgba(255,255,255,0.4)">(1-300)</span>
+                            </div>
+                        </div>`;
+                    } else {
+                        // RELAY CONTROLS (default - unchanged)
+                        controlsHtml = `
                         <div class="relay-row">
                             <span class="relay-label">Relay 1</span>
                             <span class="relay-state ${relays[0] ? 'relay-on' : 'relay-off'}">${relays[0] ? 'ON' : 'OFF'}</span>
@@ -319,7 +417,20 @@
                             <span class="relay-state ${relays[1] ? 'relay-on' : 'relay-off'}">${relays[1] ? 'ON' : 'OFF'}</span>
                             <button class="btn btn-on btn-sm" onclick="cmd('${n.mac}',2,'on')" ${!n.online ? 'disabled' : ''}>ON</button>
                             <button class="btn btn-off btn-sm" onclick="cmd('${n.mac}',2,'off')" ${!n.online ? 'disabled' : ''}>OFF</button>
+                        </div>`;
+                    }
+
+                    return `
+                    <div class="node-card" id="node-${macId}">
+                        <div class="node-header">
+                            <span class="node-mac">${n.mac}${typeBadge}</span>
+                            <span class="node-status ${n.online ? 'node-online' : 'node-offline'}">${n.online ? 'Online' : 'Offline'}</span>
                         </div>
+                        <div class="node-info">
+                            <span>RSSI: ${n.rssi} dBm</span>
+                            <span>Ver: ${n.version || '?'}</span>
+                        </div>
+                        ${controlsHtml}
                         <div class="node-ota-row">
                             <input type="file" id="file-${macId}" accept=".bin" onchange="handleNodeOtaFile(this, '${n.mac}')">
                             <label class="btn btn-ota btn-sm" for="file-${macId}" ${!n.online ? 'style="opacity:0.5;pointer-events:none"' : ''}>Update Firmware</label>
@@ -491,6 +602,82 @@
                     otaPolling = null;
                 }
             }, 1000);
+        }
+
+        // ============== LED Strip Commands ==============
+        async function ledCmd(mac, action) {
+            try {
+                await fetch('/api/led', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({mac, action})
+                });
+                setTimeout(fetchNodes, 500);
+            } catch (e) {
+                console.error('LED cmd error:', e);
+            }
+        }
+
+        async function ledColor(mac, hex) {
+            const r = parseInt(hex.substr(1,2), 16);
+            const g = parseInt(hex.substr(3,2), 16);
+            const b = parseInt(hex.substr(5,2), 16);
+            try {
+                await fetch('/api/led', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({mac, action: 'color', r, g, b})
+                });
+                setTimeout(fetchNodes, 500);
+            } catch (e) {
+                console.error('LED color error:', e);
+            }
+        }
+
+        async function ledBright(mac, value) {
+            try {
+                await fetch('/api/led', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({mac, action: 'brightness', value: parseInt(value)})
+                });
+                setTimeout(fetchNodes, 500);
+            } catch (e) {
+                console.error('LED brightness error:', e);
+            }
+        }
+
+        async function ledEffect(mac, effect) {
+            try {
+                await fetch('/api/led', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({mac, action: 'effect', effect: parseInt(effect)})
+                });
+                setTimeout(fetchNodes, 500);
+            } catch (e) {
+                console.error('LED effect error:', e);
+            }
+        }
+
+        async function ledNumLeds(mac, inputId) {
+            const input = document.getElementById(inputId);
+            const num = parseInt(input.value);
+            if (num < 1 || num > 300) {
+                alert('Numero LED deve essere tra 1 e 300');
+                return;
+            }
+            try {
+                await fetch('/api/led', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({mac, action: 'set_num_leds', num_leds: num})
+                });
+                alert('Configurazione inviata! Il LED Strip si reinizializzerà.');
+                setTimeout(fetchNodes, 1000);
+            } catch (e) {
+                console.error('LED numLeds error:', e);
+            }
         }
 
         // Initial fetch

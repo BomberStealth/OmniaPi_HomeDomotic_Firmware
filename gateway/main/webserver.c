@@ -474,6 +474,112 @@ static esp_err_t api_node_ota_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+// POST /api/led - LED Strip commands
+static esp_err_t api_led_handler(httpd_req_t *req)
+{
+    char content[256];
+    int ret = httpd_req_recv(req, content, sizeof(content) - 1);
+    if (ret <= 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No data");
+        return ESP_FAIL;
+    }
+    content[ret] = '\0';
+
+    ESP_LOGI(TAG, "LED command request: %s", content);
+
+    cJSON *json = cJSON_Parse(content);
+    cJSON *response = cJSON_CreateObject();
+
+    if (json) {
+        cJSON *mac_item = cJSON_GetObjectItem(json, "mac");
+        cJSON *action_item = cJSON_GetObjectItem(json, "action");
+
+        if (mac_item && cJSON_IsString(mac_item) && action_item && cJSON_IsString(action_item)) {
+            uint8_t mac[6];
+            if (node_manager_mac_from_string(mac_item->valuestring, mac)) {
+                const char *action_str = action_item->valuestring;
+                uint8_t params[6] = {0};
+                uint8_t params_len = 0;
+                uint8_t led_action = 0;
+                esp_err_t err = ESP_OK;
+
+                if (strcmp(action_str, "on") == 0) {
+                    led_action = LED_ACTION_ON;
+                } else if (strcmp(action_str, "off") == 0) {
+                    led_action = LED_ACTION_OFF;
+                } else if (strcmp(action_str, "color") == 0) {
+                    led_action = LED_ACTION_SET_COLOR;
+                    cJSON *r = cJSON_GetObjectItem(json, "r");
+                    cJSON *g = cJSON_GetObjectItem(json, "g");
+                    cJSON *b = cJSON_GetObjectItem(json, "b");
+                    if (r && g && b) {
+                        params[0] = (uint8_t)r->valueint;
+                        params[1] = (uint8_t)g->valueint;
+                        params[2] = (uint8_t)b->valueint;
+                        params_len = 3;
+                    }
+                } else if (strcmp(action_str, "brightness") == 0) {
+                    led_action = LED_ACTION_SET_BRIGHT;
+                    cJSON *value = cJSON_GetObjectItem(json, "value");
+                    if (value) {
+                        params[0] = (uint8_t)value->valueint;
+                        params_len = 1;
+                    }
+                } else if (strcmp(action_str, "effect") == 0) {
+                    led_action = LED_ACTION_SET_EFFECT;
+                    cJSON *effect = cJSON_GetObjectItem(json, "effect");
+                    if (effect) {
+                        params[0] = (uint8_t)effect->valueint;
+                        params_len = 1;
+                    }
+                } else if (strcmp(action_str, "speed") == 0) {
+                    led_action = LED_ACTION_SET_SPEED;
+                    cJSON *speed = cJSON_GetObjectItem(json, "speed");
+                    if (speed) {
+                        params[0] = (uint8_t)speed->valueint;
+                        params_len = 1;
+                    }
+                } else if (strcmp(action_str, "set_num_leds") == 0) {
+                    led_action = LED_ACTION_SET_NUM_LEDS;
+                    cJSON *num_leds = cJSON_GetObjectItem(json, "num_leds");
+                    if (num_leds) {
+                        uint16_t num = (uint16_t)num_leds->valueint;
+                        params[0] = num & 0xFF;         // low byte
+                        params[1] = (num >> 8) & 0xFF;  // high byte
+                        params_len = 2;
+                        ESP_LOGI(TAG, "LED set_num_leds: %d", num);
+                    }
+                }
+
+                err = espnow_master_send_led_command(mac, led_action, params, params_len);
+                cJSON_AddBoolToObject(response, "success", err == ESP_OK);
+
+                char mac_str[18];
+                node_manager_mac_to_string(mac, mac_str);
+                ESP_LOGI(TAG, "LED command to %s: %s", mac_str, action_str);
+            } else {
+                cJSON_AddBoolToObject(response, "success", false);
+                cJSON_AddStringToObject(response, "error", "Invalid MAC address");
+            }
+        } else {
+            cJSON_AddBoolToObject(response, "success", false);
+            cJSON_AddStringToObject(response, "error", "Missing mac or action");
+        }
+        cJSON_Delete(json);
+    } else {
+        cJSON_AddBoolToObject(response, "success", false);
+        cJSON_AddStringToObject(response, "error", "Invalid JSON");
+    }
+
+    char *resp_str = cJSON_PrintUnformatted(response);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, resp_str, strlen(resp_str));
+
+    free(resp_str);
+    cJSON_Delete(response);
+    return ESP_OK;
+}
+
 // POST /api/wifi/credentials - Save WiFi credentials
 static esp_err_t api_wifi_credentials_handler(httpd_req_t *req)
 {
@@ -586,6 +692,12 @@ static const httpd_uri_t uri_api_wifi_credentials = {
     .handler = api_wifi_credentials_handler,
 };
 
+static const httpd_uri_t uri_api_led = {
+    .uri = "/api/led",
+    .method = HTTP_POST,
+    .handler = api_led_handler,
+};
+
 // ============== Public Functions ==============
 esp_err_t webserver_init(void)
 {
@@ -613,6 +725,7 @@ esp_err_t webserver_init(void)
     httpd_register_uri_handler(s_server, &uri_node_ota);
     httpd_register_uri_handler(s_server, &uri_node_ota_start);
     httpd_register_uri_handler(s_server, &uri_api_wifi_credentials);
+    httpd_register_uri_handler(s_server, &uri_api_led);
 
     ESP_LOGI(TAG, "HTTP server started on port 80");
     return ESP_OK;

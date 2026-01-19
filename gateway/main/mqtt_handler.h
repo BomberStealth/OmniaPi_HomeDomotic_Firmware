@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "esp_err.h"
+#include "node_manager.h"  // For led_state_t
 
 #ifdef __cplusplus
 extern "C" {
@@ -24,6 +25,10 @@ extern "C" {
 #define MQTT_TOPIC_COMMAND      "omniapi/gateway/command"
 #define MQTT_TOPIC_NODE_PREFIX  "omniapi/gateway/node/"
 #define MQTT_TOPIC_LWT          "omniapi/gateway/lwt"
+
+// LED Strip topics (NEW)
+#define MQTT_TOPIC_LED_COMMAND  "omniapi/led/command"
+#define MQTT_TOPIC_LED_STATE    "omniapi/led/state"
 
 /**
  * Initialize MQTT client
@@ -61,6 +66,14 @@ void mqtt_handler_publish_all_nodes(void);
  * @param node_index Index of the node
  */
 void mqtt_handler_publish_node_state(int node_index);
+
+/**
+ * Publish LED strip state change
+ * Publishes to: omniapi/led/state
+ * @param mac MAC address of LED strip
+ * @param state LED state
+ */
+void mqtt_publish_led_state(const uint8_t *mac, const led_state_t *state);
 
 #ifdef __cplusplus
 }

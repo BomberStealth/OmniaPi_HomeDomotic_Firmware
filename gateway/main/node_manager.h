@@ -17,6 +17,22 @@ extern "C" {
 #define MAX_NODES 20
 #define MAC_ADDR_LEN 6
 
+// Device types
+#define DEVICE_TYPE_RELAY      0x01
+#define DEVICE_TYPE_LED_STRIP  0x10
+
+/**
+ * LED state structure (for LED_STRIP devices)
+ */
+typedef struct {
+    uint8_t r;
+    uint8_t g;
+    uint8_t b;
+    uint8_t brightness;
+    uint8_t effect;
+    bool power;
+} led_state_t;
+
 /**
  * Node information structure
  */
@@ -29,6 +45,8 @@ typedef struct {
     char version[16];
     uint8_t relay_states[2];  // State of relay 1 and 2 (0=OFF, 1=ON)
     uint8_t relay_count;      // Number of relays (default 2)
+    uint8_t device_type;      // DEVICE_TYPE_RELAY or DEVICE_TYPE_LED_STRIP
+    led_state_t led_state;    // LED state (only for LED_STRIP devices)
 } node_info_t;
 
 /**
@@ -108,6 +126,20 @@ bool node_manager_mac_from_string(const char *str, uint8_t *mac);
  * @return Number of bytes written
  */
 int node_manager_get_nodes_json(char *buffer, size_t len);
+
+/**
+ * Update LED state for a node
+ * @param mac MAC address
+ * @param state LED state
+ */
+void node_manager_update_led_state(const uint8_t *mac, const led_state_t *state);
+
+/**
+ * Set device type for a node
+ * @param mac MAC address
+ * @param type Device type (DEVICE_TYPE_RELAY or DEVICE_TYPE_LED_STRIP)
+ */
+void node_manager_set_device_type(const uint8_t *mac, uint8_t type);
 
 #ifdef __cplusplus
 }
