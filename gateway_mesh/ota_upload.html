@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>OmniaPi Gateway OTA Upload</title>
+<style>
+body { font-family: sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; background: #1a1a2e; color: #eee; }
+h1 { color: #64b5f6; }
+.box { background: #16213e; padding: 20px; border-radius: 8px; margin: 20px 0; }
+input[type="text"] { padding: 8px; width: 300px; border-radius: 4px; border: 1px solid #555; background: #0f3460; color: #eee; }
+button { padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; margin: 5px; }
+.btn-upload { background: #4caf50; color: white; }
+.btn-upload:disabled { background: #555; cursor: not-allowed; }
+#progress { display: none; margin-top: 15px; }
+.progress-bar { width: 100%; height: 24px; background: #333; border-radius: 12px; overflow: hidden; }
+.progress-fill { height: 100%; background: #4caf50; transition: width 0.3s; width: 0%; }
+#status { margin-top: 10px; font-weight: bold; }
+.error { color: #f44336; }
+.success { color: #4caf50; }
+#log { background: #0a0a1a; padding: 10px; border-radius: 4px; max-height: 200px; overflow-y: auto; font-family: monospace; font-size: 12px; margin-top: 15px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>OmniaPi Gateway - OTA Upload</h1>
+<p>Pagina standalone per flash OTA senza interferenze.</p>
+
+<div class="box">
+    <label>Gateway IP: </label>
+    <input type="text" id="gateway-ip" value="192.168.1.76" placeholder="es. 192.168.1.76">
+    <br><br>
+    <input type="file" id="firmware-file" accept=".bin">
+    <br><br>
+    <button class="btn-upload" id="upload-btn" onclick="startUpload()" disabled>Upload Firmware</button>
+</div>
+
+<div id="progress">
+    <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+    <div id="progress-text">0%</div>
+</div>
+<div id="status"></div>
+<div id="log"></div>
+
+<script>
+const fileInput = document.getElementById('firmware-file');
+const uploadBtn = document.getElementById('upload-btn');
+const progressDiv = document.getElementById('progress');
+const progressFill = document.getElementById('progress-fill');
+const progressText = document.getElementById('progress-text');
+const statusEl = document.getElementById('status');
+const logEl = document.getElementById('log');
+
+fileInput.addEventListener('change', () => {
+    uploadBtn.disabled = !fileInput.files.length;
+    if (fileInput.files.length) {
+        const f = fileInput.files[0];
+        log(`File selezionato: ${f.name} (${f.size} bytes)`);
+        // Validate magic byte
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const arr = new Uint8Array(e.target.result);
+            if (arr[0] === 0xE9) {
+                log(`Header valido: magic=0xE9, chip_id=0x${(arr[12] | (arr[13]<<8)).toString(16).padStart(4,'0')}`);
+            } else {
+                log(`ATTENZIONE: magic byte invalido 0x${arr[0].toString(16)} (atteso 0xE9)`);
+                statusEl.textContent = 'File non sembra un firmware ESP32 valido!';
+                statusEl.className = 'error';
+                uploadBtn.disabled = true;
+            }
+        };
+        reader.readAsArrayBuffer(f.slice(0, 32));
+    }
+});
+
+function log(msg) {
+    const ts = new Date().toLocaleTimeString();
+    logEl.textContent += `[${ts}] ${msg}\n`;
+    logEl.scrollTop = logEl.scrollHeight;
+}
+
+async function startUpload() {
+    const file = fileInput.files[0];
+    const ip = document.getElementById('gateway-ip').value.trim();
+    if (!file || !ip) return;
+
+    uploadBtn.disabled = true;
+    progressDiv.style.display = 'block';
+    statusEl.textContent = '';
+    statusEl.className = '';
+
+    const url = `http://${ip}/api/ota/upload`;
+    log(`Inizio upload a ${url} (${file.size} bytes)...`);
+
+    try {
+        const xhr = new XMLHttpRequest();
+
+        const result = await new Promise((resolve, reject) => {
+            xhr.upload.onprogress = (e) => {
+                if (e.lengthComputable) {
+                    const pct = Math.round((e.loaded / e.total) * 100);
+                    progressFill.style.width = pct + '%';
+                    progressText.textContent = `${pct}% (${e.loaded}/${e.total} bytes)`;
+                }
+            };
+
+            xhr.onload = () => {
+                log(`HTTP response: ${xhr.status} ${xhr.statusText}`);
+                log(`Response body: ${xhr.responseText}`);
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    try { resolve(JSON.parse(xhr.responseText)); }
+                    catch(e) { resolve({ success: xhr.status === 200 }); }
+                } else {
+                    reject(new Error(`HTTP ${xhr.status}: ${xhr.responseText}`));
+                }
+            };
+
+            xhr.onerror = () => {
+                log('XHR network error');
+                reject(new Error('Errore di rete - controlla IP e connessione'));
+            };
+            xhr.ontimeout = () => {
+                log('XHR timeout');
+                reject(new Error('Timeout upload (>3 min)'));
+            };
+
+            xhr.open('POST', url, true);
+            xhr.timeout = 180000;
+            xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+            xhr.send(file);
+        });
+
+        if (result.success) {
+            progressFill.style.width = '100%';
+            progressText.textContent = '100%';
+            statusEl.textContent = 'Upload completato! Gateway in riavvio...';
+            statusEl.className = 'success';
+            log('OTA SUCCESS - gateway si riavvia in ~3 secondi');
+        } else {
+            throw new Error(result.error || 'Firmware validation failed sul gateway');
+        }
+
+    } catch (e) {
+        statusEl.textContent = 'ERRORE: ' + e.message;
+        statusEl.className = 'error';
+        log('ERRORE: ' + e.message);
+        uploadBtn.disabled = false;
+    }
+}
+</script>
+</body>
+</html>

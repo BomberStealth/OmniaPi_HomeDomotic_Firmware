@@ -1,0 +1,36 @@
+# OmniaPi Gateway Mesh - Main Component
+
+idf_component_register(
+    SRCS
+        "main.c"
+        "mesh_network.c"
+        "mqtt_handler.c"
+        "eth_manager.c"
+        "wifi_manager.c"
+        "commissioning.c"
+        "node_manager.c"
+        "nvs_storage.c"
+        "config_manager.c"
+        "ota_manager.c"
+        "node_ota.c"
+        "webserver.c"
+        "web_api.c"
+        "web_ui.c"
+        "status_led.c"
+    INCLUDE_DIRS
+        "."
+    REQUIRES
+        esp_wifi
+        esp_netif
+        esp_eth
+        esp_event
+        nvs_flash
+        mqtt
+        esp_http_client
+        esp_http_server
+        app_update
+        driver
+        esp_timer
+        json
+        mbedtls
+)

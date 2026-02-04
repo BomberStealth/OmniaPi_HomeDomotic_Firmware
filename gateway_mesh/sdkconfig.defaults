@@ -1,0 +1,104 @@
+# OmniaPi Gateway Mesh - Default Configuration
+# Target: ESP32 (WT32-ETH01)
+
+# ==================== Target ====================
+CONFIG_IDF_TARGET="esp32"
+
+# ==================== Partition Table ====================
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"
+
+# ==================== Flash Size ====================
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
+
+# ==================== WiFi & Mesh ====================
+CONFIG_ESP_WIFI_SOFTAP_SUPPORT=y
+CONFIG_ESP_WIFI_NVS_ENABLED=y
+
+# Router Configuration (for Internet access)
+# Empty by default - provision via API
+CONFIG_MESH_ROUTER_SSID=""
+CONFIG_MESH_ROUTER_PASSWD=""
+
+# Mesh Configuration
+CONFIG_MESH_CHANNEL=0
+CONFIG_MESH_AP_PASSWD="omniapi_mesh_2024"
+CONFIG_MESH_MAX_LAYER=6
+CONFIG_MESH_AP_CONNECTIONS=6
+CONFIG_MESH_NON_MESH_AP_CONNECTIONS=0
+CONFIG_MESH_ROUTE_TABLE_SIZE=50
+
+# ==================== Ethernet (WT32-ETH01 / LAN8720) ====================
+CONFIG_ETH_USE_ESP32_EMAC=y
+CONFIG_ETH_PHY_INTERFACE_RMII=y
+CONFIG_ETH_RMII_CLK_INPUT=y
+CONFIG_ETH_RMII_CLK_IN_GPIO=0
+
+# LAN8720 PHY
+CONFIG_ETH_PHY_ADDR=1
+CONFIG_ETH_MDC_GPIO=23
+CONFIG_ETH_MDIO_GPIO=18
+CONFIG_ETH_PHY_RST_GPIO=-1
+
+# ==================== LWIP ====================
+CONFIG_LWIP_LOCAL_HOSTNAME="omniapi-gateway"
+CONFIG_LWIP_IP4_NAPT=y
+CONFIG_LWIP_DNS_SUPPORT_MDNS_QUERIES=y
+CONFIG_LWIP_MAX_SOCKETS=16
+
+# ==================== MQTT ====================
+# Empty by default - provision via API
+CONFIG_MQTT_BROKER_URI=""
+CONFIG_MQTT_PROTOCOL_311=y
+CONFIG_MQTT_TRANSPORT_SSL=n
+CONFIG_MQTT_TRANSPORT_WEBSOCKET=n
+
+# ==================== NVS ====================
+CONFIG_NVS_ENCRYPTION=n
+
+# ==================== OTA ====================
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+CONFIG_APP_ROLLBACK_ENABLE=y
+
+# ==================== FreeRTOS ====================
+CONFIG_FREERTOS_HZ=1000
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_USE_STATS_FORMATTING_FUNCTIONS=y
+
+# ==================== Logging ====================
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y
+
+# ==================== Watchdog ====================
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
+CONFIG_ESP_TASK_WDT_PANIC=n
+
+# ==================== Power Management ====================
+CONFIG_PM_ENABLE=n
+
+# ==================== Brownout Detector ====================
+# Disabled for WT32-ETH01 (WiFi radio triggers false brownouts)
+CONFIG_ESP_BROWNOUT_DET=n
+
+# ==================== Memory ====================
+CONFIG_ESP32_SPIRAM_SUPPORT=n
+
+# ==================== Compiler ====================
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
+# ==================== Serial Output ====================
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_UART_NUM=0
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
+
+# ==================== HTTP Server (Web UI) ====================
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
+CONFIG_HTTPD_MAX_URI_LEN=512
+CONFIG_HTTPD_WS_SUPPORT=y
+CONFIG_HTTPD_QUEUE_WORK_BLOCKING_TIMEOUT=500
+
+# ==================== Status LED ====================
+# Disabled on WT32-ETH01 (GPIO 2 may conflict)
+CONFIG_STATUS_LED_GPIO=-1

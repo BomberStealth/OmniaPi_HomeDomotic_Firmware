@@ -9,6 +9,7 @@ build/
 sdkconfig
 sdkconfig.old
 dependencies.lock
+managed_components/
 
 # Arduino
 *.ino.bin
@@ -74,7 +75,14 @@ build_*.bat
 build_*.cmd
 build_*.ps1
 flash_*.bat
+configure_*.bat
 run_*.py
 do_build.bat
 fullbuild.bat
 get_shortcut.ps1
+
+# Build logs / artifacts
+*_log.txt
+build_output.txt
+build_stderr.txt
+build_stdout.txt

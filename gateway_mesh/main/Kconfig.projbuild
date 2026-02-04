@@ -1,0 +1,153 @@
+menu "OmniaPi Gateway Mesh Configuration"
+
+    menu "Mesh Network Settings"
+        config MESH_CHANNEL
+            int "Mesh network channel"
+            range 1 14
+            default 6
+            help
+                WiFi channel for mesh network (1-14).
+
+        config MESH_ROUTER_SSID
+            string "Router SSID"
+            default ""
+            help
+                SSID of the router to connect to (for internet access).
+                Leave empty for provisioning via API.
+
+        config MESH_ROUTER_PASSWD
+            string "Router Password"
+            default ""
+            help
+                Password of the router.
+                Leave empty for provisioning via API.
+
+        config MESH_AP_PASSWD
+            string "Mesh AP Password"
+            default "omniapi_mesh"
+            help
+                Password for mesh softAP (used by child nodes to connect).
+
+        config MESH_MAX_LAYER
+            int "Maximum mesh layer"
+            range 2 25
+            default 6
+            help
+                Maximum number of layers in the mesh network (root = layer 1).
+
+        config MESH_AP_CONNECTIONS
+            int "Maximum mesh AP connections"
+            range 1 10
+            default 6
+            help
+                Maximum number of child nodes that can connect to this device.
+
+        config MESH_NON_MESH_AP_CONNECTIONS
+            int "Maximum non-mesh AP connections"
+            range 0 4
+            default 0
+            help
+                Maximum number of non-mesh stations (e.g., phones for commissioning).
+    endmenu
+
+    menu "MQTT Settings"
+        config MQTT_BROKER_URI
+            string "MQTT Broker URI"
+            default "mqtt://192.168.1.252:1883"
+            help
+                URI of the MQTT broker (e.g., mqtt://host:port).
+                Leave empty for provisioning via API.
+
+        config MQTT_USERNAME
+            string "MQTT Username"
+            default ""
+            help
+                MQTT broker username.
+
+        config MQTT_PASSWORD
+            string "MQTT Password"
+            default ""
+            help
+                MQTT broker password.
+
+        config MQTT_CLIENT_ID
+            string "MQTT Client ID"
+            default "omniapi_gateway"
+            help
+                MQTT client identifier.
+    endmenu
+
+    menu "Ethernet Settings (WT32-ETH01)"
+        config ETH_PHY_ADDR
+            int "PHY Address"
+            range 0 31
+            default 1
+            help
+                PHY address for LAN8720 on WT32-ETH01.
+
+        config ETH_PHY_RST_GPIO
+            int "PHY Reset GPIO"
+            range -1 39
+            default -1
+            help
+                GPIO for PHY reset (-1 = not used).
+
+        config ETH_MDC_GPIO
+            int "MDC GPIO"
+            default 23
+            help
+                GPIO for RMII MDC.
+
+        config ETH_MDIO_GPIO
+            int "MDIO GPIO"
+            default 18
+            help
+                GPIO for RMII MDIO.
+
+        config ETH_CLK_MODE
+            int "Clock Mode"
+            range 0 3
+            default 0
+            help
+                0=GPIO0_IN, 1=GPIO0_OUT, 2=GPIO16_OUT, 3=GPIO17_OUT
+    endmenu
+
+    menu "Status LED"
+        config STATUS_LED_GPIO
+            int "Status LED GPIO"
+            range -1 39
+            default 2
+            help
+                GPIO pin for status LED (-1 = disabled).
+                WT32-ETH01 typically has LED on GPIO 2.
+
+        config STATUS_LED_ACTIVE_LOW
+            bool "LED active low"
+            default n
+            help
+                If enabled, LED is ON when GPIO is LOW.
+    endmenu
+
+    menu "Gateway Settings"
+        config GATEWAY_FIRMWARE_VERSION
+            string "Firmware Version"
+            default "1.3.5"
+            help
+                Gateway firmware version string.
+
+        config GATEWAY_HEARTBEAT_INTERVAL_MS
+            int "Heartbeat interval (ms)"
+            range 1000 60000
+            default 5000
+            help
+                Interval for sending heartbeat to nodes.
+
+        config GATEWAY_NODE_TIMEOUT_MS
+            int "Node timeout (ms)"
+            range 10000 300000
+            default 30000
+            help
+                Time after which a node is considered offline.
+    endmenu
+
+endmenu

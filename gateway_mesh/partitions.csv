@@ -1,0 +1,23 @@
+# OmniaPi Gateway Mesh - Partition Table
+# Total Flash: 4MB (0x400000)
+#
+# Name,       Type, SubType, Offset,   Size,     Flags
+# -------------------------------------------------------
+nvs,          data, nvs,     0x9000,   0x6000,
+phy_init,     data, phy,     0xf000,   0x1000,
+otadata,      data, ota,     0x10000,  0x2000,
+factory,      app,  factory, 0x20000,  0x140000,
+ota_0,        app,  ota_0,   0x160000, 0x140000,
+ota_1,        app,  ota_1,   0x2A0000, 0x140000,
+storage,      data, 0x82,    0x3E0000, 0x20000,
+# -------------------------------------------------------
+# Layout (4MB Flash):
+#   nvs:      24KB   @ 0x009000 - NVS storage
+#   phy_init: 4KB    @ 0x00F000 - PHY calibration
+#   otadata:  8KB    @ 0x010000 - OTA data
+#   factory:  1.25MB @ 0x020000 - Factory app
+#   ota_0:    1.25MB @ 0x160000 - OTA slot 0
+#   ota_1:    1.25MB @ 0x2A0000 - OTA slot 1
+#   storage:  128KB  @ 0x3E0000 - Local config
+# -------------------------------------------------------
+# Total used: 4MB (0x400000)

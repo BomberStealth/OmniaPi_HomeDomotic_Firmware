@@ -1,0 +1,75 @@
+# OmniaPi Node Mesh - Default Configuration
+# Target: ESP32-C3 (4MB Flash)
+
+# =============================================================================
+# Target
+# =============================================================================
+CONFIG_IDF_TARGET="esp32c3"
+
+# =============================================================================
+# Flash & Partition
+# =============================================================================
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"
+
+# =============================================================================
+# WiFi & Mesh Configuration
+# =============================================================================
+CONFIG_ESP_WIFI_SOFTAP_SUPPORT=y
+CONFIG_ESP_WIFI_NVS_ENABLED=y
+
+# Mesh settings
+CONFIG_MESH_ENABLE=y
+
+# Router Configuration (required by ESP-MESH even for nodes)
+CONFIG_MESH_ROUTER_SSID="Porte Di Durin"
+CONFIG_MESH_ROUTER_PASSWD="Mellon!!!"
+
+# Mesh Network Configuration
+CONFIG_MESH_CHANNEL=0
+CONFIG_MESH_AP_PASSWD="omniapi_mesh_2024"
+CONFIG_MESH_MAX_LAYER=6
+CONFIG_MESH_AP_CONNECTIONS=6
+
+# =============================================================================
+# FreeRTOS
+# =============================================================================
+CONFIG_FREERTOS_HZ=1000
+
+# =============================================================================
+# Log Level
+# =============================================================================
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_LOG_DEFAULT_LEVEL=3
+
+# =============================================================================
+# NVS
+# =============================================================================
+CONFIG_NVS_ENCRYPTION=n
+
+# =============================================================================
+# Power Management (disabled for mesh reliability)
+# =============================================================================
+CONFIG_PM_ENABLE=n
+
+# =============================================================================
+# Watchdog
+# =============================================================================
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
+
+# =============================================================================
+# LED Strip (RMT for WS2812B)
+# =============================================================================
+CONFIG_RMT_ENABLE=y
+
+# =============================================================================
+# OTA
+# =============================================================================
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# =============================================================================
+# Compiler Optimizations
+# =============================================================================
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y

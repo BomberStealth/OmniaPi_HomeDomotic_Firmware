@@ -154,12 +154,21 @@ static void espnow_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t *
     }
 }
 
-static void espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status)
+// Callback interno (logica originale)
+static void espnow_send_cb_internal(const uint8_t *mac_addr, esp_now_send_status_t status)
 {
     (void)mac_addr;  // unused
     s_tx_count++;
     if (status != ESP_NOW_SEND_SUCCESS) {
         ESP_LOGW(TAG, "ESP-NOW send failed");
+    }
+}
+
+// Wrapper per ESP-IDF 5.5+ (nuova firma API)
+static void espnow_send_cb(const wifi_tx_info_t *tx_info, esp_now_send_status_t status)
+{
+    if (tx_info != NULL) {
+        espnow_send_cb_internal(tx_info->des_addr, status);
     }
 }
 

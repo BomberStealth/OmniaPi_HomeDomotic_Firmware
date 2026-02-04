@@ -1,0 +1,183 @@
+menu "OmniaPi Node Mesh Configuration"
+
+    menu "Mesh Network Settings"
+        config MESH_ROUTER_SSID
+            string "Router SSID"
+            default "Porte Di Durin"
+            help
+                Router SSID (required by ESP-MESH even for non-root nodes).
+
+        config MESH_ROUTER_PASSWD
+            string "Router Password"
+            default "Mellon!!!"
+            help
+                Router password (required by ESP-MESH even for non-root nodes).
+
+        config MESH_CHANNEL
+            int "Mesh network channel"
+            range 0 14
+            default 0
+            help
+                WiFi channel for mesh network (0 = auto, must match gateway).
+
+        config MESH_AP_PASSWD
+            string "Mesh AP Password"
+            default "omniapi_mesh_2024"
+            help
+                Password for mesh network (must match gateway).
+
+        config MESH_MAX_LAYER
+            int "Maximum mesh layer"
+            range 2 25
+            default 6
+            help
+                Maximum number of layers in the mesh network.
+
+        config MESH_AP_CONNECTIONS
+            int "Maximum mesh AP connections"
+            range 1 10
+            default 6
+            help
+                Maximum number of child nodes that can connect to this node.
+    endmenu
+
+    menu "Device Type"
+        choice NODE_DEVICE_TYPE
+            prompt "Node device type"
+            default NODE_DEVICE_TYPE_RELAY
+            help
+                Select the type of device this node controls.
+
+            config NODE_DEVICE_TYPE_RELAY
+                bool "Relay module"
+
+            config NODE_DEVICE_TYPE_LED
+                bool "LED strip (WS2812B)"
+
+            config NODE_DEVICE_TYPE_SENSOR
+                bool "Sensor only"
+        endchoice
+    endmenu
+
+    menu "Relay Configuration"
+        depends on NODE_DEVICE_TYPE_RELAY
+
+        comment "Relay mode (GPIO/UART) is configurable at runtime via gateway UI"
+
+        config RELAY_COUNT
+            int "Number of relay channels"
+            range 1 4
+            default 1
+            help
+                Number of relay channels on this module.
+
+        menu "GPIO Mode Settings"
+            config RELAY_CH1_GPIO
+                int "Relay Channel 1 GPIO (for GPIO mode)"
+                range 0 21
+                default 2
+                help
+                    GPIO pin for relay channel 1 when using GPIO mode.
+
+            config RELAY_ACTIVE_HIGH
+                bool "Relay active high"
+                default y
+                help
+                    If enabled, relay is ON when GPIO is HIGH.
+        endmenu
+
+        menu "UART Mode Settings"
+            config RELAY_UART_TX_GPIO
+                int "UART TX GPIO (for UART mode)"
+                range 0 21
+                default 21
+                help
+                    GPIO pin for UART TX (connects to relay module RX pin).
+
+            config RELAY_UART_BAUD
+                int "UART Baud rate"
+                default 9600
+                help
+                    Baud rate for relay UART communication.
+        endmenu
+    endmenu
+
+    menu "LED Strip Configuration"
+        depends on NODE_DEVICE_TYPE_LED
+
+        config LED_STRIP_GPIO
+            int "LED Strip data GPIO"
+            range 0 21
+            default 8
+            help
+                GPIO pin for WS2812B data line.
+
+        config LED_STRIP_COUNT
+            int "Number of LEDs"
+            range 1 300
+            default 30
+            help
+                Number of LEDs in the strip.
+
+        config LED_STRIP_RMT_CHANNEL
+            int "RMT Channel"
+            range 0 3
+            default 0
+            help
+                RMT channel for LED control.
+    endmenu
+
+    menu "Button Configuration"
+        config BUTTON_GPIO
+            int "Button GPIO"
+            range 0 21
+            default 9
+            help
+                GPIO pin for the physical button.
+
+        config BUTTON_ACTIVE_LOW
+            bool "Button active low"
+            default y
+            help
+                If enabled, button is pressed when GPIO is LOW.
+
+        config BUTTON_LONG_PRESS_MS
+            int "Long press duration (ms)"
+            range 1000 30000
+            default 10000
+            help
+                Duration to trigger factory reset (10 seconds default).
+    endmenu
+
+    menu "Status LED"
+        config STATUS_LED_GPIO
+            int "Status LED GPIO"
+            range -1 21
+            default 10
+            help
+                GPIO pin for status LED (-1 = disabled).
+                ESP32-C3: GPIO 10 is typically free.
+
+        config STATUS_LED_ACTIVE_LOW
+            bool "LED active low"
+            default n
+            help
+                If enabled, LED is ON when GPIO is LOW.
+    endmenu
+
+    menu "Node Settings"
+        config NODE_FIRMWARE_VERSION
+            string "Firmware Version"
+            default "1.1.2"
+            help
+                Node firmware version string.
+
+        config NODE_HEARTBEAT_RESPONSE_TIMEOUT_MS
+            int "Heartbeat response timeout (ms)"
+            range 5000 60000
+            default 15000
+            help
+                Time to wait for gateway heartbeat before reconnect attempt.
+    endmenu
+
+endmenu
