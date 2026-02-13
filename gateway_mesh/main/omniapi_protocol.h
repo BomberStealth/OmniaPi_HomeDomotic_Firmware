@@ -483,7 +483,7 @@ typedef struct __attribute__((packed)) {
 #define MQTT_TOPIC_GATEWAY          "omniapi/gateway"
 #define MQTT_TOPIC_NODES            "omniapi/gateway/nodes"
 #define MQTT_TOPIC_CMD              "omniapi/gateway/cmd"
-#define MQTT_TOPIC_STATE            "omniapi/gateway/state"
+#define MQTT_TOPIC_STATUS           "omniapi/gateway/status"
 #define MQTT_TOPIC_SCAN             "omniapi/gateway/scan"
 #define MQTT_TOPIC_COMMISSION       "omniapi/gateway/commission"
 #define MQTT_TOPIC_OTA_START        "omniapi/gateway/ota/start"

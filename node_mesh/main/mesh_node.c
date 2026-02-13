@@ -308,7 +308,7 @@ esp_err_t mesh_node_start(void)
 
     // Mesh softAP configuration (for child nodes to connect)
     ESP_ERROR_CHECK(esp_mesh_set_ap_authmode(WIFI_AUTH_WPA2_PSK));
-    cfg.mesh_ap.max_connection = 1;  // LEAF node - config requires >= 1, MESH_LEAF type blocks children
+    cfg.mesh_ap.max_connection = CONFIG_MESH_AP_CONNECTIONS;  // Allow child nodes for relay/multi-hop
     cfg.mesh_ap.nonmesh_max_connection = 0;  // No non-mesh connections on nodes
 
     // Set mesh password (discovery or production)
@@ -316,10 +316,10 @@ esp_err_t mesh_node_start(void)
 
     ESP_ERROR_CHECK(esp_mesh_set_config(&cfg));
 
-    // *** NODE CONFIGURATION - ALWAYS LEAF ***
-    // This device is NEVER the root - gateway is FIXED ROOT
-    // Node must ONLY connect as child, never become root
-    ESP_ERROR_CHECK(esp_mesh_set_type(MESH_LEAF));   // Force LEAF - never root
+    // *** NODE CONFIGURATION - NON-ROOT with RELAY ***
+    // Gateway is FIXED ROOT. Nodes can relay for other nodes (multi-hop)
+    // but NEVER become root themselves.
+    // NOTE: Do NOT set MESH_LEAF - it prevents relay/multi-hop!
     ESP_ERROR_CHECK(esp_mesh_fix_root(true));        // There IS a fixed root (gateway)
 
     // Self-organized but NEVER try to become root

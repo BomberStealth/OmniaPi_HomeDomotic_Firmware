@@ -143,6 +143,33 @@ esp_err_t config_set_mqtt(const char *broker_uri, const char *username, const ch
 esp_err_t config_set_mesh(const char *ap_password, uint8_t channel);
 
 // ============================================================================
+// Provision Code (for backend association)
+// ============================================================================
+
+/**
+ * Set provision code (6-digit code from app)
+ * Saved to NVS, will be included in next MQTT gateway status
+ * @param code 6-digit provision code
+ * @return ESP_OK on success
+ */
+esp_err_t config_set_provision_code(const char *code);
+
+/**
+ * Get current provision code
+ * @param buf Buffer to store code (at least 7 bytes)
+ * @param buf_size Buffer size
+ * @return ESP_OK if code exists, ESP_ERR_NOT_FOUND if not set
+ */
+esp_err_t config_get_provision_code(char *buf, size_t buf_size);
+
+/**
+ * Clear provision code from NVS
+ * Called after successful MQTT publish
+ * @return ESP_OK on success
+ */
+esp_err_t config_clear_provision_code(void);
+
+// ============================================================================
 // Factory Reset
 // ============================================================================
 

@@ -24,6 +24,7 @@ static const char *TAG = "CONFIG_MGR";
 #define NVS_KEY_MESH_PASS       "mesh_pass"
 #define NVS_KEY_MESH_CHANNEL    "mesh_chan"
 #define NVS_KEY_PROVISIONED     "provisioned"
+#define NVS_KEY_PROVISION_CODE  "prov_code"
 
 // ============================================================================
 // Runtime Configuration (loaded at init)
@@ -412,6 +413,49 @@ esp_err_t config_set_mesh(const char *ap_password, uint8_t channel)
 }
 
 // ============================================================================
+// Public Functions - Provision Code
+// ============================================================================
+
+esp_err_t config_set_provision_code(const char *code)
+{
+    if (code == NULL || strlen(code) == 0) {
+        ESP_LOGE(TAG, "Invalid provision code");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    ESP_LOGI(TAG, "Setting provision code: %s", code);
+
+    esp_err_t err = nvs_storage_save_string(NVS_KEY_PROVISION_CODE, code);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to save provision code: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    ESP_LOGI(TAG, "Provision code saved to NVS");
+    return ESP_OK;
+}
+
+esp_err_t config_get_provision_code(char *buf, size_t buf_size)
+{
+    if (buf == NULL || buf_size < 7) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    esp_err_t err = nvs_storage_load_string(NVS_KEY_PROVISION_CODE, buf, buf_size);
+    if (err != ESP_OK || strlen(buf) == 0) {
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    return ESP_OK;
+}
+
+esp_err_t config_clear_provision_code(void)
+{
+    ESP_LOGI(TAG, "Clearing provision code from NVS");
+    return nvs_storage_erase(NVS_KEY_PROVISION_CODE);
+}
+
+// ============================================================================
 // Public Functions - Factory Reset
 // ============================================================================
 
@@ -429,6 +473,7 @@ esp_err_t config_factory_reset(void)
     nvs_storage_erase(NVS_KEY_MESH_PASS);
     nvs_storage_erase(NVS_KEY_MESH_CHANNEL);
     nvs_storage_erase(NVS_KEY_PROVISIONED);
+    nvs_storage_erase(NVS_KEY_PROVISION_CODE);
 
     ESP_LOGW(TAG, "Factory reset complete - restart to apply");
     return ESP_OK;

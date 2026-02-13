@@ -30,6 +30,10 @@ extern "C" {
 #define MQTT_TOPIC_LED_COMMAND  "omniapi/led/command"
 #define MQTT_TOPIC_LED_STATE    "omniapi/led/state"
 
+// Command topics (from backend)
+#define MQTT_TOPIC_CMD_FACTORY_RESET  "omniapi/gateway/cmd/factory-reset"
+#define MQTT_TOPIC_CMD_DELETE_NODE    "omniapi/gateway/cmd/delete-node"
+
 /**
  * Initialize MQTT client
  * @return ESP_OK on success

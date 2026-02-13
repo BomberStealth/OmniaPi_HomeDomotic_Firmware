@@ -141,6 +141,12 @@ void node_manager_update_led_state(const uint8_t *mac, const led_state_t *state)
  */
 void node_manager_set_device_type(const uint8_t *mac, uint8_t type);
 
+/**
+ * Clear all nodes from memory (factory reset)
+ * @return Number of nodes that were cleared
+ */
+int node_manager_clear_all(void);
+
 #ifdef __cplusplus
 }
 #endif

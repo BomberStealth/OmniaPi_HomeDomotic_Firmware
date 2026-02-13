@@ -144,6 +144,9 @@ static void mesh_rx_handler(const uint8_t *src_mac, const uint8_t *data, size_t 
             if (announce->commissioned) {
                 // Commissioned node: add to node_manager for normal operation
                 node_manager_add_node(src_mac);
+                // Update with announce data (device_type, firmware_version, commissioned)
+                node_manager_update_from_announce(src_mac, announce);
+                s_state.mesh_nodes_count = node_manager_get_count();
                 // Publish to MQTT
                 if (s_state.mqtt_connected) {
                     mqtt_publish_node_connected(src_mac);
@@ -703,7 +706,7 @@ void app_main(void)
     // Create main tasks
     xTaskCreate(gateway_task, "gateway_task", 4096, NULL, 5, NULL);
     xTaskCreate(heartbeat_task, "heartbeat_task", 4096, NULL, 4, NULL);
-    xTaskCreate(status_task, "status_task", 2048, NULL, 3, NULL);
+    xTaskCreate(status_task, "status_task", 4096, NULL, 3, NULL);
 
     ESP_LOGI(TAG, "Gateway initialization complete");
     ESP_LOGI(TAG, "  Ethernet: %s (netif=%p)", s_eth_init_ok ? "INIT OK" : "INIT FAILED", eth_manager_get_netif());

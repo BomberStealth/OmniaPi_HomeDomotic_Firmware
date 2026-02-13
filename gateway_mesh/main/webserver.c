@@ -4,7 +4,7 @@
 
 #include "webserver.h"
 #include "web_api.h"
-#include "web_ui.h"
+#include "config_manager.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -234,28 +234,13 @@ static void ws_ping_task(void *arg)
 
 static esp_err_t root_handler(httpd_req_t *req)
 {
-    httpd_resp_set_type(req, "text/html");
-    httpd_resp_set_hdr(req, "Content-Encoding", "identity");
-    return httpd_resp_send(req, web_ui_get_html(), HTTPD_RESP_USE_STRLEN);
-}
-
-static esp_err_t css_handler(httpd_req_t *req)
-{
-    httpd_resp_set_type(req, "text/css");
-    return httpd_resp_send(req, web_ui_get_css(), HTTPD_RESP_USE_STRLEN);
-}
-
-static esp_err_t js_handler(httpd_req_t *req)
-{
-    httpd_resp_set_type(req, "application/javascript");
-    return httpd_resp_send(req, web_ui_get_js(), HTTPD_RESP_USE_STRLEN);
-}
-
-static esp_err_t favicon_handler(httpd_req_t *req)
-{
-    httpd_resp_set_type(req, "image/x-icon");
-    httpd_resp_set_status(req, "204 No Content");
-    return httpd_resp_send(req, NULL, 0);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    char buf[128];
+    snprintf(buf, sizeof(buf),
+             "{\"gateway\":\"omniapi\",\"version\":\"%s\",\"api\":\"/api/\"}",
+             CONFIG_GATEWAY_FIRMWARE_VERSION);
+    return httpd_resp_send(req, buf, HTTPD_RESP_USE_STRLEN);
 }
 
 // ============================================================================
@@ -288,7 +273,7 @@ esp_err_t webserver_start(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = WEBSERVER_PORT;
     config.stack_size = WEBSERVER_STACK_SIZE;
-    config.max_uri_handlers = 70;  // 31 API + 31 OPTIONS + 5 static + headroom
+    config.max_uri_handlers = 67;  // 31 API + 31 OPTIONS + 2 static (root + ws) + headroom
     config.max_open_sockets = 7;   // Increased for WebSocket + API calls (max 7 on ESP32)
     config.lru_purge_enable = false;  // Disabled to prevent WebSocket disconnection
 
@@ -300,34 +285,13 @@ esp_err_t webserver_start(void)
         return ret;
     }
 
-    // Register static handlers
+    // Register root handler (JSON info)
     httpd_uri_t root_uri = {
         .uri = "/",
         .method = HTTP_GET,
         .handler = root_handler
     };
     httpd_register_uri_handler(s_server, &root_uri);
-
-    httpd_uri_t css_uri = {
-        .uri = "/style.css",
-        .method = HTTP_GET,
-        .handler = css_handler
-    };
-    httpd_register_uri_handler(s_server, &css_uri);
-
-    httpd_uri_t js_uri = {
-        .uri = "/app.js",
-        .method = HTTP_GET,
-        .handler = js_handler
-    };
-    httpd_register_uri_handler(s_server, &js_uri);
-
-    httpd_uri_t favicon_uri = {
-        .uri = "/favicon.ico",
-        .method = HTTP_GET,
-        .handler = favicon_handler
-    };
-    httpd_register_uri_handler(s_server, &favicon_uri);
 
     // Register WebSocket handler
     httpd_uri_t ws_uri = {

@@ -20,7 +20,7 @@
 
 static const char *TAG = "mqtt_handler";
 
-#define FIRMWARE_VERSION "1.8.7-idf"
+#define FIRMWARE_VERSION "1.9.0-idf"
 
 // Gateway command topic for reboot
 #define MQTT_TOPIC_GW_COMMAND "omniapi/gateway/command"
@@ -49,8 +49,10 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
             // Subscribe to command topics
             esp_mqtt_client_subscribe(s_mqtt_client, MQTT_TOPIC_COMMAND, 0);
             esp_mqtt_client_subscribe(s_mqtt_client, MQTT_TOPIC_GW_COMMAND, 0);
-            esp_mqtt_client_subscribe(s_mqtt_client, MQTT_TOPIC_LED_COMMAND, 0);  // LED Strip
-            ESP_LOGI(TAG, "Subscribed to: %s, %s, %s", MQTT_TOPIC_COMMAND, MQTT_TOPIC_GW_COMMAND, MQTT_TOPIC_LED_COMMAND);
+            esp_mqtt_client_subscribe(s_mqtt_client, MQTT_TOPIC_LED_COMMAND, 0);
+            esp_mqtt_client_subscribe(s_mqtt_client, MQTT_TOPIC_CMD_FACTORY_RESET, 0);
+            esp_mqtt_client_subscribe(s_mqtt_client, MQTT_TOPIC_CMD_DELETE_NODE, 0);
+            ESP_LOGI(TAG, "Subscribed to command topics (5)");
 
             // Publish initial status
             mqtt_handler_publish_status();
@@ -78,6 +80,60 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
                     vTaskDelay(pdMS_TO_TICKS(1000));
                     esp_restart();
                 }
+            }
+
+            // Check for factory-reset command
+            if (event->topic_len == strlen(MQTT_TOPIC_CMD_FACTORY_RESET) &&
+                strncmp(event->topic, MQTT_TOPIC_CMD_FACTORY_RESET, event->topic_len) == 0) {
+                ESP_LOGW(TAG, ">>> FACTORY RESET COMMAND RECEIVED <<<");
+
+                // Send MSG_DECOMMISSION to each node before clearing
+                int count = node_manager_get_count();
+                for (int i = 0; i < count; i++) {
+                    node_info_t *node = node_manager_get_node(i);
+                    if (node) {
+                        char mac_str[18];
+                        node_manager_mac_to_string(node->mac, mac_str);
+                        ESP_LOGI(TAG, "Factory reset: decommissioning node %s", mac_str);
+                        espnow_master_send_decommission(node->mac);
+                        vTaskDelay(pdMS_TO_TICKS(50)); // Small delay between sends
+                    }
+                }
+
+                // Clear all nodes from memory
+                int cleared = node_manager_clear_all();
+                ESP_LOGW(TAG, "Factory reset: decommissioned %d nodes, clearing all", cleared);
+
+                // Publish updated (empty) node list and status
+                mqtt_handler_publish_all_nodes();
+                mqtt_handler_publish_status();
+                break;
+            }
+
+            // Check for delete-node command
+            if (event->topic_len == strlen(MQTT_TOPIC_CMD_DELETE_NODE) &&
+                strncmp(event->topic, MQTT_TOPIC_CMD_DELETE_NODE, event->topic_len) == 0) {
+                char *payload = malloc(event->data_len + 1);
+                if (payload) {
+                    memcpy(payload, event->data, event->data_len);
+                    payload[event->data_len] = '\0';
+
+                    cJSON *json = cJSON_Parse(payload);
+                    if (json) {
+                        cJSON *mac_json = cJSON_GetObjectItem(json, "mac");
+                        if (mac_json && cJSON_IsString(mac_json)) {
+                            uint8_t mac[6];
+                            if (node_manager_mac_from_string(mac_json->valuestring, mac)) {
+                                ESP_LOGI(TAG, "Delete-node: decommissioning %s", mac_json->valuestring);
+                                espnow_master_send_decommission(mac);
+                                // Note: node will be removed from list on next heartbeat cycle
+                            }
+                        }
+                        cJSON_Delete(json);
+                    }
+                    free(payload);
+                }
+                break;
             }
 
             // Check if it's a node command (RELAY - existing)

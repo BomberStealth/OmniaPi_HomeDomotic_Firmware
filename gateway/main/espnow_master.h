@@ -42,6 +42,9 @@ extern "C" {
 #define MSG_LED_COMMAND     0x40
 #define MSG_LED_ACK         0x41
 
+// Decommission message (node should enter discovery mode)
+#define MSG_DECOMMISSION    0x50
+
 // LED Actions
 #define LED_ACTION_OFF          0x00
 #define LED_ACTION_ON           0x01
@@ -123,6 +126,13 @@ esp_err_t espnow_master_send_led_command(const uint8_t *mac, uint8_t action, con
  * @return ESP_OK on success
  */
 esp_err_t espnow_master_send_led_command_extended(const uint8_t *mac, uint8_t action, const uint8_t *params, uint8_t params_len);
+
+/**
+ * Send decommission message to a node (node should enter discovery mode)
+ * @param mac Target MAC address
+ * @return ESP_OK on success
+ */
+esp_err_t espnow_master_send_decommission(const uint8_t *mac);
 
 #ifdef __cplusplus
 }

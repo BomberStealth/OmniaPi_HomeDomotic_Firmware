@@ -38,6 +38,13 @@ node_info_t* node_manager_get_node(const uint8_t *mac);
 node_info_t* node_manager_get_all(int *count);
 
 esp_err_t node_manager_update_info(const uint8_t *mac, const payload_heartbeat_ack_t *info);
+esp_err_t node_manager_update_from_announce(const uint8_t *mac, const payload_node_announce_t *announce);
+
+/**
+ * Clear all nodes from memory (factory reset)
+ * @return Number of nodes that were cleared
+ */
+int node_manager_clear_all(void);
 
 #ifdef __cplusplus
 }

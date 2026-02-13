@@ -281,3 +281,15 @@ void node_manager_set_device_type(const uint8_t *mac, uint8_t type)
         ESP_LOGI(TAG, "Node %s device_type set to 0x%02X", mac_str, type);
     }
 }
+
+int node_manager_clear_all(void)
+{
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    int count = s_node_count;
+    memset(s_nodes, 0, sizeof(s_nodes));
+    s_node_count = 0;
+    xSemaphoreGive(s_mutex);
+
+    ESP_LOGW(TAG, "Factory reset: cleared %d nodes from memory", count);
+    return count;
+}

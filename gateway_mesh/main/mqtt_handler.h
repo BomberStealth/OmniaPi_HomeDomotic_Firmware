@@ -50,6 +50,20 @@ void mqtt_handler_process(void);
  */
 bool mqtt_handler_is_connected(void);
 
+/**
+ * Suspend MQTT client (stop + block reconnect)
+ * Call before mesh switch to prevent reconnect loops
+ * @return ESP_OK on success
+ */
+esp_err_t mqtt_handler_suspend(void);
+
+/**
+ * Resume MQTT client after mesh switch
+ * Restarts the client connection cleanly
+ * @return ESP_OK on success
+ */
+esp_err_t mqtt_handler_resume(void);
+
 // ============================================================================
 // Generic Publishing
 // ============================================================================

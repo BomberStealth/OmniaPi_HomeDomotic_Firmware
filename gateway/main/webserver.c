@@ -19,7 +19,7 @@
 
 static const char *TAG = "webserver";
 
-#define FIRMWARE_VERSION "1.8.7-idf"
+#define FIRMWARE_VERSION "1.9.0-idf"
 
 // HTTP server handle
 static httpd_handle_t s_server = NULL;

@@ -22,9 +22,10 @@ static const char *TAG = "COMMISSION";
 // ============================================================================
 // Configuration
 // ============================================================================
-#define SCAN_TIMEOUT_MS         300000  // Safety timeout: 5 minutes (user controls stop)
+#define SCAN_TIMEOUT_MS         25000   // Auto-stop after 25s (MQTT suspended during scan)
 #define SCAN_CLEANUP_TIMEOUT_MS 60000   // Remove old results after 60 seconds
 #define MESH_SWITCH_DELAY_MS    1000    // Wait time after mesh switch
+#define MQTT_CONNECT_TIMEOUT_MS 10000   // Max wait for MQTT to connect after resume
 
 // Mesh IDs
 static const uint8_t MESH_ID_PROD[6] = MESH_ID_PRODUCTION;
@@ -46,6 +47,10 @@ static char s_network_key[33] = {0};
 static char s_plant_id[33] = {0};
 static bool s_credentials_set = false;
 
+// Commission ACK tracking
+static volatile bool s_commission_ack_received = false;
+static volatile bool s_commission_ack_success = false;
+
 // ============================================================================
 // Forward Declarations
 // ============================================================================
@@ -57,6 +62,32 @@ static void scan_stop_task(void *pvParameters);
 
 // Task handle for async scan operations
 static TaskHandle_t s_scan_task_handle = NULL;
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+/**
+ * Wait for MQTT to be actually connected after resume.
+ * Polls mqtt_handler_is_connected() every 500ms up to MQTT_CONNECT_TIMEOUT_MS.
+ * @return true if connected, false if timeout
+ */
+static bool wait_mqtt_connected(void)
+{
+    if (mqtt_handler_is_connected()) return true;
+
+    ESP_LOGI(TAG, "Waiting for MQTT to connect (max %d ms)...", MQTT_CONNECT_TIMEOUT_MS);
+    int attempts = MQTT_CONNECT_TIMEOUT_MS / 500;
+    for (int i = 0; i < attempts; i++) {
+        vTaskDelay(pdMS_TO_TICKS(500));
+        if (mqtt_handler_is_connected()) {
+            ESP_LOGI(TAG, "MQTT connected after %d ms", (i + 1) * 500);
+            return true;
+        }
+    }
+    ESP_LOGE(TAG, "MQTT NOT connected after %d ms timeout!", MQTT_CONNECT_TIMEOUT_MS);
+    return false;
+}
 
 // ============================================================================
 // Initialization
@@ -158,16 +189,31 @@ esp_err_t commissioning_get_credentials(uint8_t *network_id, char *network_key)
 // Async task to perform the actual mesh switch for scanning
 static void scan_start_task(void *pvParameters)
 {
-    ESP_LOGI(TAG, "Scan task started - switching to discovery mesh...");
+    ESP_LOGW(TAG, ">>> scan_start_task ENTERED <<<");
+    ESP_LOGW(TAG, "  s_scanning=%d, s_current_mode=%s",
+             s_scanning,
+             s_current_mode == COMMISSION_MODE_DISCOVERY ? "DISCOVERY" : "PRODUCTION");
 
-    // Small delay to allow HTTP response to be sent
+    // Small delay to allow HTTP/MQTT response to be sent
     vTaskDelay(pdMS_TO_TICKS(100));
+
+    // Check if scanning was cancelled during the delay
+    if (!s_scanning) {
+        ESP_LOGW(TAG, ">>> SCAN CANCELLED during initial delay! Aborting task. <<<");
+        s_scan_task_handle = NULL;
+        vTaskDelete(NULL);
+        return;
+    }
+
+    // Suspend MQTT before mesh switch to prevent reconnect loops
+    mqtt_handler_suspend();
 
     // Step 1: Stop production mesh
     ESP_LOGI(TAG, "Step 1: Stopping production mesh...");
     esp_err_t ret = mesh_network_stop();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to stop production mesh: %s", esp_err_to_name(ret));
+        mqtt_handler_resume();
         s_scanning = false;
         s_scan_task_handle = NULL;
         vTaskDelete(NULL);
@@ -184,6 +230,8 @@ static void scan_start_task(void *pvParameters)
         ESP_LOGE(TAG, "Failed to start discovery mesh: %s", esp_err_to_name(ret));
         // Try to restart production mesh
         mesh_network_start_with_id(MESH_ID_PROD, MESH_PASSWORD_PRODUCTION);
+        vTaskDelay(pdMS_TO_TICKS(2000));
+        mqtt_handler_resume();
         s_scanning = false;
         s_scan_task_handle = NULL;
         vTaskDelete(NULL);
@@ -239,6 +287,7 @@ esp_err_t commissioning_start_scan(void)
             mesh_network_start_with_id(MESH_ID_PROD, MESH_PASSWORD_PRODUCTION);
             s_current_mode = COMMISSION_MODE_PRODUCTION;
             vTaskDelay(pdMS_TO_TICKS(2000)); // Wait for mesh to stabilize
+            mqtt_handler_resume();  // Ensure MQTT is resumed after recovery
         }
     }
 
@@ -257,6 +306,13 @@ esp_err_t commissioning_start_scan(void)
 
     s_scanning = true;
     s_current_seq++;
+
+    ESP_LOGW(TAG, ">>> PRE-TASK STATE DUMP <<<");
+    ESP_LOGW(TAG, "  s_scanning=%d (just set to true)", s_scanning);
+    ESP_LOGW(TAG, "  s_current_mode=%s", s_current_mode == COMMISSION_MODE_DISCOVERY ? "DISCOVERY" : "PRODUCTION");
+    ESP_LOGW(TAG, "  s_scan_task_handle=%p", (void*)s_scan_task_handle);
+    ESP_LOGW(TAG, "  s_current_seq=%d", s_current_seq);
+    ESP_LOGW(TAG, "  Free heap: %lu bytes", (unsigned long)esp_get_free_heap_size());
 
     // Create task to do the actual mesh switch (async)
     // This allows the HTTP response to be sent before the network changes
@@ -298,10 +354,20 @@ static void scan_stop_task(void *pvParameters)
 
     s_current_mode = COMMISSION_MODE_PRODUCTION;
 
+    // Wait for production mesh to stabilize before resuming MQTT
+    vTaskDelay(pdMS_TO_TICKS(2000));
+
+    // Resume MQTT now that we're back on production mesh
+    mqtt_handler_resume();
+
     ESP_LOGI(TAG, "=== BACK TO PRODUCTION MODE - Found %d nodes ===", s_scan_count);
 
-    // Publish scan results to MQTT
-    mqtt_publish_scan_results(s_scan_results, s_scan_count);
+    // Wait for MQTT to actually connect before publishing
+    if (wait_mqtt_connected()) {
+        mqtt_publish_scan_results(s_scan_results, s_scan_count);
+    } else {
+        ESP_LOGE(TAG, "Cannot publish scan results - MQTT not connected");
+    }
 
     s_scan_task_handle = NULL;
     vTaskDelete(NULL);
@@ -361,13 +427,11 @@ bool commissioning_is_scanning(void)
     return s_scanning;
 }
 
-static void scan_timer_callback(TimerHandle_t timer)
+// One-shot task spawned by timer callback to do the heavy stop work
+static void scan_timeout_task(void *pvParameters)
 {
-    // Safety timeout after 5 minutes - auto-stop to prevent getting stuck
-    ESP_LOGW(TAG, "=== SCAN SAFETY TIMEOUT (5 min) - Auto-stopping ===");
+    ESP_LOGW(TAG, "=== SCAN TIMEOUT TASK - switching back to production ===");
     ESP_LOGI(TAG, "Found %d nodes during scan", s_scan_count);
-
-    s_scanning = false;
 
     // Stop discovery mesh and restart production
     mesh_network_stop();
@@ -375,10 +439,39 @@ static void scan_timer_callback(TimerHandle_t timer)
     mesh_network_start_with_id(MESH_ID_PROD, MESH_PASSWORD_PRODUCTION);
     s_current_mode = COMMISSION_MODE_PRODUCTION;
 
+    // Wait for production mesh to stabilize before resuming MQTT
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    mqtt_handler_resume();
+
     ESP_LOGI(TAG, "=== Back to PRODUCTION mode ===");
 
-    // Publish scan results to MQTT
-    mqtt_publish_scan_results(s_scan_results, s_scan_count);
+    // Wait for MQTT to actually connect before publishing
+    if (wait_mqtt_connected()) {
+        mqtt_publish_scan_results(s_scan_results, s_scan_count);
+    } else {
+        ESP_LOGE(TAG, "Cannot publish scan results - MQTT not connected");
+    }
+
+    s_scan_task_handle = NULL;
+    vTaskDelete(NULL);
+}
+
+static void scan_timer_callback(TimerHandle_t timer)
+{
+    // Timer callback runs in Tmr Svc context (small stack, must NOT block).
+    // Just set flag and spawn a task to do the heavy work.
+    ESP_LOGW(TAG, "=== SCAN SAFETY TIMEOUT ===");
+    s_scanning = false;
+
+    BaseType_t ret = xTaskCreate(scan_timeout_task, "scan_timeout", 4096, NULL, 5, &s_scan_task_handle);
+    if (ret != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create scan_timeout task! Forcing production mode.");
+        // Last resort: try minimal recovery without blocking
+        mesh_network_stop();
+        mesh_network_start_with_id(MESH_ID_PROD, MESH_PASSWORD_PRODUCTION);
+        s_current_mode = COMMISSION_MODE_PRODUCTION;
+        mqtt_handler_resume();
+    }
 }
 
 // ============================================================================
@@ -552,9 +645,12 @@ esp_err_t commissioning_add_node(const uint8_t *mac, const char *node_name)
     if (need_mesh_switch) {
         ESP_LOGI(TAG, "Switching to discovery mesh to reach uncommissioned node...");
 
+        mqtt_handler_suspend();
+
         ret = mesh_network_stop();
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to stop mesh: %s", esp_err_to_name(ret));
+            mqtt_handler_resume();
             return ret;
         }
 
@@ -564,11 +660,39 @@ esp_err_t commissioning_add_node(const uint8_t *mac, const char *node_name)
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to start discovery mesh: %s", esp_err_to_name(ret));
             mesh_network_start_with_id(MESH_ID_PROD, MESH_PASSWORD_PRODUCTION);
+            vTaskDelay(pdMS_TO_TICKS(2000));
+            mqtt_handler_resume();
             return ret;
         }
 
         s_current_mode = COMMISSION_MODE_DISCOVERY;
-        vTaskDelay(pdMS_TO_TICKS(MESH_SWITCH_DELAY_MS * 3));  // Wait for node to reconnect
+
+        // Wait for target node to appear in routing table (max 15s)
+        ESP_LOGI(TAG, "Waiting for node %02X:%02X:%02X:%02X:%02X:%02X in routing table...",
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        bool node_found = false;
+        for (int i = 0; i < 30; i++) {  // 30 x 500ms = 15s
+            vTaskDelay(pdMS_TO_TICKS(500));
+            if (mesh_network_is_node_reachable(mac)) {
+                node_found = true;
+                ESP_LOGI(TAG, "Node found in routing table after %d ms", (i + 1) * 500);
+                break;
+            }
+            if ((i % 4) == 3) {
+                ESP_LOGI(TAG, "  Still waiting... (%d.%ds)", (i + 1) / 2, ((i + 1) % 2) * 5);
+            }
+        }
+
+        if (!node_found) {
+            ESP_LOGE(TAG, "Node NOT found in discovery mesh after 15s - aborting commission");
+            mesh_network_stop();
+            vTaskDelay(pdMS_TO_TICKS(MESH_SWITCH_DELAY_MS));
+            mesh_network_start_with_id(MESH_ID_PROD, MESH_PASSWORD_PRODUCTION);
+            s_current_mode = COMMISSION_MODE_PRODUCTION;
+            vTaskDelay(pdMS_TO_TICKS(2000));
+            mqtt_handler_resume();
+            return ESP_ERR_NOT_FOUND;
+        }
     }
 
     // Build commission message
@@ -594,6 +718,10 @@ esp_err_t commissioning_add_node(const uint8_t *mac, const char *node_name)
     ESP_LOGI(TAG, "  Plant ID: %s", cmd->plant_id);
     ESP_LOGI(TAG, "  Node Name: %s", cmd->node_name);
 
+    // Clear ACK tracking before sending
+    s_commission_ack_received = false;
+    s_commission_ack_success = false;
+
     // Send to specific node
     mesh_addr_t addr;
     memcpy(addr.addr, mac, 6);
@@ -602,19 +730,97 @@ esp_err_t commissioning_add_node(const uint8_t *mac, const char *node_name)
 
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to send commission command: %s", esp_err_to_name(ret));
-    } else {
-        ESP_LOGI(TAG, "Commission command sent - waiting for ACK...");
+        if (need_mesh_switch) {
+            mesh_network_stop();
+            vTaskDelay(pdMS_TO_TICKS(MESH_SWITCH_DELAY_MS));
+            mesh_network_start_with_id(MESH_ID_PROD, MESH_PASSWORD_PRODUCTION);
+            s_current_mode = COMMISSION_MODE_PRODUCTION;
+            vTaskDelay(pdMS_TO_TICKS(2000));
+            mqtt_handler_resume();
+            if (wait_mqtt_connected()) {
+                mqtt_publish_commission_result(mac, false, "Failed to send commission command");
+            }
+        }
+        return ret;
     }
 
-    // Wait a bit for ACK, then switch back if needed
-    if (need_mesh_switch) {
-        vTaskDelay(pdMS_TO_TICKS(3000));  // Wait for ACK
+    ESP_LOGI(TAG, "Commission command sent - waiting for ACK (3s)...");
 
+    // Brief wait for ACK on discovery mesh (node may reply before switching)
+    for (int i = 0; i < 6; i++) {
+        vTaskDelay(pdMS_TO_TICKS(500));
+        if (s_commission_ack_received) {
+            ESP_LOGI(TAG, "ACK received on discovery mesh after %d ms!", (i + 1) * 500);
+            break;
+        }
+    }
+
+    bool got_ack = s_commission_ack_received;
+    bool ack_ok = s_commission_ack_success;
+
+    // Switch back to production mesh
+    if (need_mesh_switch) {
         ESP_LOGI(TAG, "Switching back to production mesh...");
         mesh_network_stop();
         vTaskDelay(pdMS_TO_TICKS(MESH_SWITCH_DELAY_MS));
         mesh_network_start_with_id(MESH_ID_PROD, MESH_PASSWORD_PRODUCTION);
         s_current_mode = COMMISSION_MODE_PRODUCTION;
+        vTaskDelay(pdMS_TO_TICKS(2000));
+        mqtt_handler_resume();
+
+        if (got_ack) {
+            // ACK arrived on discovery mesh - use its result
+            ESP_LOGI(TAG, "Using ACK result: success=%d", ack_ok);
+            if (ack_ok) {
+                node_manager_add_node(mac);
+            }
+            // Wait for MQTT to actually connect before publishing result
+            if (wait_mqtt_connected()) {
+                if (ack_ok) {
+                    mqtt_publish_commission_result(mac, true, "Node commissioned successfully");
+                } else {
+                    mqtt_publish_commission_result(mac, false, "Node rejected commission");
+                }
+            } else {
+                ESP_LOGE(TAG, "Cannot publish commission result - MQTT not connected (ack=%d)", ack_ok);
+            }
+        } else {
+            // No ACK received - node probably switched to production before replying
+            // Verify by checking if node appears on production mesh
+            ESP_LOGW(TAG, "No ACK received - checking if node joined production mesh...");
+
+            bool node_on_production = false;
+            for (int i = 0; i < 30; i++) {  // 30 x 500ms = 15s
+                vTaskDelay(pdMS_TO_TICKS(500));
+                if (mesh_network_is_node_reachable(mac)) {
+                    node_on_production = true;
+                    ESP_LOGI(TAG, "Node found on PRODUCTION mesh after %d ms - commission SUCCESS!",
+                             (i + 1) * 500);
+                    break;
+                }
+                if ((i % 4) == 3) {
+                    ESP_LOGI(TAG, "  Still waiting for node on production... (%d.%ds)",
+                             (i + 1) / 2, ((i + 1) % 2) * 5);
+                }
+            }
+
+            if (node_on_production) {
+                node_manager_add_node(mac);
+            }
+
+            // Wait for MQTT to actually connect before publishing result
+            if (wait_mqtt_connected()) {
+                if (node_on_production) {
+                    mqtt_publish_commission_result(mac, true, "Node commissioned (verified on production mesh)");
+                } else {
+                    ESP_LOGE(TAG, "Node NOT found on production mesh after 15s - commission FAILED");
+                    mqtt_publish_commission_result(mac, false, "Node not found on production mesh after commission");
+                }
+            } else {
+                ESP_LOGE(TAG, "Cannot publish commission result - MQTT not connected (node_on_prod=%d)",
+                         node_on_production);
+            }
+        }
     }
 
     return ret;
@@ -662,20 +868,17 @@ void commissioning_handle_commission_ack(const uint8_t *src_mac, const omniapi_m
             s_scan_results[idx].commissioned = 1;
         }
 
-        // Add to node manager immediately
-        // The node will connect to production mesh shortly, but we add it now
-        // so it appears in the UI right away
-        ESP_LOGI(TAG, "Adding commissioned node to node_manager");
-        node_manager_add_node(ack->mac);
-
-        // Publish to MQTT
-        mqtt_publish_commission_result(ack->mac, true, "Node commissioned successfully");
+        // Set flags - commissioning_add_node() will handle node_manager + MQTT publish
+        // (MQTT is likely suspended during mesh switch, so we can't publish here)
+        s_commission_ack_received = true;
+        s_commission_ack_success = true;
     } else {
         ESP_LOGW(TAG, "Commission ACK (FAILED) from %02X:%02X:%02X:%02X:%02X:%02X status=%d",
                  ack->mac[0], ack->mac[1], ack->mac[2],
                  ack->mac[3], ack->mac[4], ack->mac[5], ack->status);
 
-        mqtt_publish_commission_result(ack->mac, false, "Commissioning failed");
+        s_commission_ack_received = true;
+        s_commission_ack_success = false;
     }
 }
 

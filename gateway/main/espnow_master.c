@@ -164,12 +164,10 @@ static void espnow_send_cb_internal(const uint8_t *mac_addr, esp_now_send_status
     }
 }
 
-// Wrapper per ESP-IDF 5.5+ (nuova firma API)
-static void espnow_send_cb(const wifi_tx_info_t *tx_info, esp_now_send_status_t status)
+// Send callback (ESP-IDF v5.4 API)
+static void espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status)
 {
-    if (tx_info != NULL) {
-        espnow_send_cb_internal(tx_info->des_addr, status);
-    }
+    espnow_send_cb_internal(mac_addr, status);
 }
 
 // ============== Public Functions ==============
@@ -324,6 +322,29 @@ esp_err_t espnow_master_send_led_command_extended(const uint8_t *mac, uint8_t ac
     char mac_str[18];
     node_manager_mac_to_string(mac, mac_str);
     ESP_LOGI(TAG, "LED extended command to %s: action=0x%02X params_len=%d", mac_str, action, params_len);
+
+    return ret;
+}
+
+esp_err_t espnow_master_send_decommission(const uint8_t *mac)
+{
+    if (mac == NULL) return ESP_ERR_INVALID_ARG;
+
+    // Add peer if not exists
+    esp_now_peer_info_t peer_info = {
+        .channel = 0,
+        .ifidx = WIFI_IF_STA,
+        .encrypt = false,
+    };
+    memcpy(peer_info.peer_addr, mac, 6);
+    esp_now_add_peer(&peer_info);
+
+    uint8_t msg[1] = {MSG_DECOMMISSION};
+    esp_err_t ret = esp_now_send(mac, msg, sizeof(msg));
+
+    char mac_str[18];
+    node_manager_mac_to_string(mac, mac_str);
+    ESP_LOGI(TAG, "Sent DECOMMISSION to %s", mac_str);
 
     return ret;
 }

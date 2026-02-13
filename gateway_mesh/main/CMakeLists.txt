@@ -15,7 +15,6 @@ idf_component_register(
         "node_ota.c"
         "webserver.c"
         "web_api.c"
-        "web_ui.c"
         "status_led.c"
     INCLUDE_DIRS
         "."

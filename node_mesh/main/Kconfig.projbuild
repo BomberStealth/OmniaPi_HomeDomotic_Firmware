@@ -168,7 +168,7 @@ menu "OmniaPi Node Mesh Configuration"
     menu "Node Settings"
         config NODE_FIRMWARE_VERSION
             string "Firmware Version"
-            default "1.1.2"
+            default "1.1.3"
             help
                 Node firmware version string.
 

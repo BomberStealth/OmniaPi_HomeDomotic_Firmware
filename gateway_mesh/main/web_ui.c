@@ -204,6 +204,10 @@ static const char HTML_PAGE[] = R"rawliteral(
                     <label for="wifi-cfg-pass">Password</label>
                     <input type="password" id="wifi-cfg-pass" placeholder="Password" maxlength="64">
                 </div>
+                <div class="form-group">
+                    <label for="wifi-cfg-code">Provision Code (optional)</label>
+                    <input type="text" id="wifi-cfg-code" placeholder="6-digit code from app" maxlength="6" pattern="[0-9]{6}" style="letter-spacing:0.3em;font-weight:bold;">
+                </div>
                 <button onclick="saveWifiConfig()" class="btn btn-primary" id="wifi-save-btn">Save WiFi</button>
                 <span id="wifi-save-status" style="margin-left:10px;"></span>
                 <hr>
@@ -1261,14 +1265,17 @@ async function scanWifi() {
 async function saveWifiConfig() {
     const ssid = document.getElementById('wifi-cfg-ssid').value.trim();
     const pass = document.getElementById('wifi-cfg-pass').value;
+    const code = document.getElementById('wifi-cfg-code').value.trim();
     const st = document.getElementById('wifi-save-status');
     if (!ssid) { st.textContent = 'SSID required'; return; }
     st.textContent = 'Saving...';
     try {
+        const body = {ssid: ssid, password: pass};
+        if (code && code.length === 6) { body.provision_code = code; }
         const r = await fetch('/api/provision/wifi', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ssid: ssid, password: pass})
+            body: JSON.stringify(body)
         });
         const d = await r.json();
         st.textContent = d.success ? 'Saved! Rebooting...' : (d.error || 'Error');

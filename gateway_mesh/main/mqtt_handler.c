@@ -10,7 +10,14 @@
 #include "ota_manager.h"
 #include "omniapi_protocol.h"
 #include "config_manager.h"
+#include "eth_manager.h"
+#include "node_manager.h"
+#include "mesh_network.h"
 #include "esp_log.h"
+#include "esp_wifi.h"
+#include "esp_timer.h"
+#include "esp_system.h"
+#include "esp_netif.h"
 #include "mqtt_client.h"
 #include "cJSON.h"
 #include <string.h>
@@ -24,6 +31,9 @@ static const char *TAG = "MQTT_HDL";
 // ============================================================================
 static esp_mqtt_client_handle_t s_client = NULL;
 static bool s_connected = false;
+static bool s_mqtt_suspended = false;  // Block reconnect during mesh switch
+static char s_lwt_message[64] = {0};
+static char s_mac_str[18] = "00:00:00:00:00:00";
 
 // Callbacks from main.c
 extern void on_mqtt_connected(void);
@@ -39,6 +49,9 @@ static void handle_credentials_command(const char *data, int data_len);
 static void handle_identify_command(const char *data, int data_len);
 static void handle_ota_start_command(const char *data, int data_len);
 static void handle_ota_abort_command(const char *data, int data_len);
+static void handle_relay_command(const char *data, int data_len);
+static void handle_delete_node_command(const char *data, int data_len);
+static void handle_factory_reset_command(void);
 static bool parse_mac_address(const char *mac_str, uint8_t *mac_out);
 
 // ============================================================================
@@ -66,9 +79,11 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
             break;
 
         case MQTT_EVENT_DISCONNECTED:
-            ESP_LOGW(TAG, "MQTT Disconnected");
+            ESP_LOGW(TAG, "MQTT Disconnected (suspended=%d)", s_mqtt_suspended);
             s_connected = false;
-            on_mqtt_disconnected();
+            if (!s_mqtt_suspended) {
+                on_mqtt_disconnected();
+            }
             break;
 
         case MQTT_EVENT_DATA: {
@@ -102,6 +117,21 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
             else if (strcmp(topic, MQTT_TOPIC_OTA_ABORT) == 0) {
                 handle_ota_abort_command(event->data, event->data_len);
             }
+            else if (strcmp(topic, MQTT_TOPIC_CMD "/reboot") == 0) {
+                ESP_LOGW(TAG, "Reboot command received! Restarting in 1 second...");
+                mqtt_publish_gateway_status(false);
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                esp_restart();
+            }
+            else if (strcmp(topic, MQTT_TOPIC_CMD "/relay") == 0) {
+                handle_relay_command(event->data, event->data_len);
+            }
+            else if (strcmp(topic, MQTT_TOPIC_CMD "/delete-node") == 0) {
+                handle_delete_node_command(event->data, event->data_len);
+            }
+            else if (strcmp(topic, MQTT_TOPIC_CMD "/factory-reset") == 0) {
+                handle_factory_reset_command();
+            }
             else {
                 ESP_LOGW(TAG, "Unknown topic: %s", topic);
             }
@@ -125,6 +155,17 @@ esp_err_t mqtt_handler_init(void)
 {
     ESP_LOGI(TAG, "Initializing MQTT...");
 
+    // Get gateway MAC address (WiFi STA MAC)
+    uint8_t mac[6];
+    esp_wifi_get_mac(WIFI_IF_STA, mac);
+    snprintf(s_mac_str, sizeof(s_mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+    // Build LWT message on same topic as status: {"online":false,"mac":"XX:XX:XX:XX:XX:XX"}
+    snprintf(s_lwt_message, sizeof(s_lwt_message),
+             "{\"online\":false,\"mac\":\"%s\"}", s_mac_str);
+    ESP_LOGI(TAG, "LWT configured: %s -> %s", MQTT_TOPIC_STATUS, s_lwt_message);
+
     // Get MQTT config from config_manager (NVS with Kconfig fallback)
     const config_mqtt_t *mqtt_config = config_get_mqtt();
 
@@ -135,6 +176,14 @@ esp_err_t mqtt_handler_init(void)
         .credentials.client_id = mqtt_config->client_id,
         .session.keepalive = 60,
         .network.reconnect_timeout_ms = 5000,
+        // Last Will and Testament (same topic as status)
+        .session.last_will = {
+            .topic = MQTT_TOPIC_STATUS,
+            .msg = s_lwt_message,
+            .msg_len = 0,  // auto-detect from null-terminated string
+            .qos = 1,
+            .retain = false,
+        },
     };
 
     s_client = esp_mqtt_client_init(&mqtt_cfg);
@@ -145,8 +194,9 @@ esp_err_t mqtt_handler_init(void)
 
     esp_mqtt_client_register_event(s_client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
 
-    ESP_LOGI(TAG, "MQTT initialized, broker: %s (configured: %s)",
-             mqtt_config->broker_uri, mqtt_config->configured ? "YES" : "NO/defaults");
+    ESP_LOGI(TAG, "MQTT initialized, broker: %s (configured: %s), MAC: %s",
+             mqtt_config->broker_uri, mqtt_config->configured ? "YES" : "NO/defaults",
+             s_mac_str);
     return ESP_OK;
 }
 
@@ -170,6 +220,25 @@ void mqtt_handler_process(void)
 bool mqtt_handler_is_connected(void)
 {
     return s_connected;
+}
+
+esp_err_t mqtt_handler_suspend(void)
+{
+    if (s_client == NULL) return ESP_ERR_INVALID_STATE;
+    ESP_LOGW(TAG, "MQTT SUSPENDED - stopping client for mesh switch");
+    s_mqtt_suspended = true;
+    s_connected = false;
+    esp_mqtt_client_stop(s_client);
+    return ESP_OK;
+}
+
+esp_err_t mqtt_handler_resume(void)
+{
+    if (s_client == NULL) return ESP_ERR_INVALID_STATE;
+    ESP_LOGW(TAG, "MQTT RESUMED - restarting client after mesh switch");
+    s_mqtt_suspended = false;
+    esp_mqtt_client_start(s_client);
+    return ESP_OK;
 }
 
 // ============================================================================
@@ -272,6 +341,77 @@ static void handle_decommission_command(const char *data, int data_len)
     cJSON_Delete(json);
 }
 
+static void handle_delete_node_command(const char *data, int data_len)
+{
+    ESP_LOGI(TAG, "Delete-node command received");
+
+    cJSON *json = cJSON_ParseWithLength(data, data_len);
+    if (json == NULL) {
+        ESP_LOGE(TAG, "Failed to parse delete-node JSON");
+        return;
+    }
+
+    cJSON *mac_json = cJSON_GetObjectItem(json, "mac");
+    if (!mac_json || !cJSON_IsString(mac_json)) {
+        ESP_LOGE(TAG, "Missing 'mac' in delete-node command");
+        cJSON_Delete(json);
+        return;
+    }
+
+    uint8_t mac[6];
+    if (!parse_mac_address(mac_json->valuestring, mac)) {
+        ESP_LOGE(TAG, "Invalid MAC format: %s", mac_json->valuestring);
+        cJSON_Delete(json);
+        return;
+    }
+
+    // Remove from node manager
+    esp_err_t ret = node_manager_remove_node(mac);
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "Node removed: %s", mac_json->valuestring);
+    } else {
+        ESP_LOGW(TAG, "Node not found for removal: %s", mac_json->valuestring);
+    }
+
+    // Send decommission to the node via mesh (so it resets)
+    omniapi_message_t msg;
+    OMNIAPI_INIT_HEADER(&msg.header, MSG_DECOMMISSION, 0, sizeof(payload_decommission_t));
+    payload_decommission_t *payload = (payload_decommission_t *)msg.payload;
+    memcpy(payload->mac, mac, 6);
+    mesh_network_send(mac, (uint8_t *)&msg, OMNIAPI_MSG_SIZE(sizeof(payload_decommission_t)));
+
+    cJSON_Delete(json);
+}
+
+static void handle_factory_reset_command(void)
+{
+    ESP_LOGW(TAG, ">>> FACTORY RESET COMMAND RECEIVED <<<");
+
+    // Send MSG_DECOMMISSION to each node before clearing
+    int count = 0;
+    node_info_t *nodes = node_manager_get_all(&count);
+    for (int i = 0; i < count; i++) {
+        ESP_LOGI(TAG, "Factory reset: decommissioning node %02X:%02X:%02X:%02X:%02X:%02X",
+                 nodes[i].mac[0], nodes[i].mac[1], nodes[i].mac[2],
+                 nodes[i].mac[3], nodes[i].mac[4], nodes[i].mac[5]);
+
+        omniapi_message_t msg;
+        OMNIAPI_INIT_HEADER(&msg.header, MSG_DECOMMISSION, 0, sizeof(payload_decommission_t));
+        payload_decommission_t *payload = (payload_decommission_t *)msg.payload;
+        memcpy(payload->mac, nodes[i].mac, 6);
+        mesh_network_send(nodes[i].mac, (uint8_t *)&msg, OMNIAPI_MSG_SIZE(sizeof(payload_decommission_t)));
+
+        vTaskDelay(pdMS_TO_TICKS(50));  // Small delay between sends
+    }
+
+    // Clear all nodes from memory
+    int cleared = node_manager_clear_all();
+    ESP_LOGW(TAG, "Factory reset complete: decommissioned %d nodes", cleared);
+
+    // Publish updated (empty) status
+    mqtt_publish_gateway_status(true);
+}
+
 static void handle_credentials_command(const char *data, int data_len)
 {
     ESP_LOGI(TAG, "Credentials command received");
@@ -338,6 +478,74 @@ static void handle_identify_command(const char *data, int data_len)
     cJSON_Delete(json);
 }
 
+static void handle_relay_command(const char *data, int data_len)
+{
+    ESP_LOGI(TAG, "Relay command received");
+
+    cJSON *json = cJSON_ParseWithLength(data, data_len);
+    if (json == NULL) {
+        ESP_LOGE(TAG, "Failed to parse relay command JSON");
+        return;
+    }
+
+    cJSON *mac_json = cJSON_GetObjectItem(json, "mac");
+    cJSON *channel_json = cJSON_GetObjectItem(json, "channel");
+    cJSON *action_json = cJSON_GetObjectItem(json, "action");
+
+    if (!mac_json || !cJSON_IsString(mac_json)) {
+        ESP_LOGE(TAG, "Missing 'mac' in relay command");
+        cJSON_Delete(json);
+        return;
+    }
+
+    if (!action_json || !cJSON_IsString(action_json)) {
+        ESP_LOGE(TAG, "Missing 'action' in relay command");
+        cJSON_Delete(json);
+        return;
+    }
+
+    uint8_t mac[6];
+    if (!parse_mac_address(mac_json->valuestring, mac)) {
+        ESP_LOGE(TAG, "Invalid MAC format: %s", mac_json->valuestring);
+        cJSON_Delete(json);
+        return;
+    }
+
+    uint8_t channel = 0;
+    if (channel_json && cJSON_IsNumber(channel_json)) {
+        channel = (uint8_t)channel_json->valueint;
+    }
+
+    // Map action string to protocol constant
+    uint8_t action;
+    const char *action_str = action_json->valuestring;
+    if (strcmp(action_str, "on") == 0) {
+        action = RELAY_ACTION_ON;
+    } else if (strcmp(action_str, "off") == 0) {
+        action = RELAY_ACTION_OFF;
+    } else if (strcmp(action_str, "toggle") == 0) {
+        action = RELAY_ACTION_TOGGLE;
+    } else {
+        ESP_LOGE(TAG, "Unknown relay action: %s", action_str);
+        cJSON_Delete(json);
+        return;
+    }
+
+    // Build and send mesh message
+    omniapi_message_t msg;
+    OMNIAPI_INIT_HEADER(&msg.header, MSG_RELAY_CMD, 0, sizeof(payload_relay_cmd_t));
+    payload_relay_cmd_t *payload = (payload_relay_cmd_t *)msg.payload;
+    payload->channel = channel;
+    payload->action = action;
+
+    esp_err_t ret = mesh_network_send(mac, (uint8_t *)&msg, OMNIAPI_MSG_SIZE(sizeof(payload_relay_cmd_t)));
+
+    ESP_LOGI(TAG, "Relay command sent to %s: ch=%d action=%s result=%s",
+             mac_json->valuestring, channel, action_str, esp_err_to_name(ret));
+
+    cJSON_Delete(json);
+}
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -389,13 +597,89 @@ esp_err_t mqtt_publish_gateway_status(bool online)
 {
     if (!s_connected) return ESP_ERR_INVALID_STATE;
 
-    char payload[128];
-    snprintf(payload, sizeof(payload),
-             "{\"status\":\"%s\",\"version\":\"%s\"}",
-             online ? "online" : "offline",
-             CONFIG_GATEWAY_FIRMWARE_VERSION);
+    // Get current IP (prefer ETH, fallback WiFi STA, fallback 0.0.0.0)
+    char ip_str[16] = "0.0.0.0";
+    eth_manager_get_ip(ip_str, sizeof(ip_str));
+    bool eth_connected = eth_manager_is_connected();
 
-    int msg_id = esp_mqtt_client_publish(s_client, MQTT_TOPIC_STATE, payload, 0, 1, 1);
+    // Se ETH non ha IP valido, prova WiFi STA
+    if (strcmp(ip_str, "0.0.0.0") == 0) {
+        esp_netif_t *sta_netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+        if (sta_netif) {
+            esp_netif_ip_info_t ip_info;
+            if (esp_netif_get_ip_info(sta_netif, &ip_info) == ESP_OK && ip_info.ip.addr != 0) {
+                snprintf(ip_str, sizeof(ip_str), IPSTR, IP2STR(&ip_info.ip));
+                ESP_LOGI(TAG, "Using WiFi STA IP: %s", ip_str);
+            }
+        }
+    }
+
+    // Uptime in seconds
+    int64_t uptime = esp_timer_get_time() / 1000000;
+
+    // Node count
+    int nodes_count = node_manager_get_count();
+
+    // Check for provision code in NVS
+    char provision_code[8] = {0};
+    bool has_provision_code = (config_get_provision_code(provision_code, sizeof(provision_code)) == ESP_OK);
+
+    // Build JSON with cJSON for safety
+    cJSON *json = cJSON_CreateObject();
+    cJSON_AddBoolToObject(json, "online", online);
+    cJSON_AddStringToObject(json, "mac", s_mac_str);
+    cJSON_AddStringToObject(json, "ip", ip_str);
+    cJSON_AddStringToObject(json, "version", CONFIG_GATEWAY_FIRMWARE_VERSION);
+    cJSON_AddNumberToObject(json, "uptime", (double)uptime);
+    cJSON_AddNumberToObject(json, "nodes_count", nodes_count);
+    cJSON_AddBoolToObject(json, "eth_connected", eth_connected);
+
+    // Include provision code if present (for backend association)
+    if (has_provision_code && strlen(provision_code) > 0) {
+        cJSON_AddStringToObject(json, "provision_code", provision_code);
+        ESP_LOGI(TAG, "Including provision_code in status: %s", provision_code);
+    }
+
+    // Include nodes array with details
+    if (nodes_count > 0) {
+        int count = 0;
+        node_info_t *nodes = node_manager_get_all(&count);
+        cJSON *nodes_arr = cJSON_CreateArray();
+        for (int i = 0; i < count; i++) {
+            cJSON *node = cJSON_CreateObject();
+            char mac_str[18];
+            snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+                     nodes[i].mac[0], nodes[i].mac[1], nodes[i].mac[2],
+                     nodes[i].mac[3], nodes[i].mac[4], nodes[i].mac[5]);
+            cJSON_AddStringToObject(node, "mac", mac_str);
+            cJSON_AddNumberToObject(node, "type", nodes[i].device_type);
+            cJSON_AddStringToObject(node, "fw", nodes[i].firmware_version);
+            cJSON_AddBoolToObject(node, "commissioned", nodes[i].commissioned);
+            cJSON_AddNumberToObject(node, "rssi", nodes[i].rssi);
+            cJSON_AddBoolToObject(node, "online", nodes[i].status == NODE_STATUS_ONLINE);
+            cJSON_AddItemToArray(nodes_arr, node);
+        }
+        cJSON_AddItemToObject(json, "nodes", nodes_arr);
+    }
+
+    char *payload = cJSON_PrintUnformatted(json);
+    if (payload == NULL) {
+        cJSON_Delete(json);
+        return ESP_FAIL;
+    }
+
+    int msg_id = esp_mqtt_client_publish(s_client, MQTT_TOPIC_STATUS, payload, 0, 1, 1);
+
+    ESP_LOGI(TAG, "Published gateway status: %s", payload);
+    cJSON_free(payload);
+    cJSON_Delete(json);
+
+    // Clear provision code after successful publish (one-time use)
+    if (msg_id >= 0 && has_provision_code) {
+        config_clear_provision_code();
+        ESP_LOGI(TAG, "Provision code cleared after successful publish");
+    }
+
     return (msg_id >= 0) ? ESP_OK : ESP_FAIL;
 }
 

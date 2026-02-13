@@ -1093,6 +1093,7 @@ static esp_err_t api_provision_wifi_handler(httpd_req_t *req)
 
     cJSON *ssid_item = cJSON_GetObjectItem(body, "ssid");
     cJSON *pass_item = cJSON_GetObjectItem(body, "password");
+    cJSON *code_item = cJSON_GetObjectItem(body, "provision_code");
 
     if (!ssid_item || !cJSON_IsString(ssid_item) || strlen(ssid_item->valuestring) == 0) {
         cJSON_Delete(body);
@@ -1102,11 +1103,26 @@ static esp_err_t api_provision_wifi_handler(httpd_req_t *req)
 
     const char *ssid = ssid_item->valuestring;
     const char *password = (pass_item && cJSON_IsString(pass_item)) ? pass_item->valuestring : "";
+    const char *provision_code = (code_item && cJSON_IsString(code_item) && strlen(code_item->valuestring) == 6)
+                                  ? code_item->valuestring : NULL;
 
-    ESP_LOGI(TAG, "Provisioning WiFi: SSID=%s", ssid);
+    ESP_LOGI(TAG, "Provisioning WiFi: SSID=%s, provision_code=%s", ssid, provision_code ? provision_code : "(none)");
     webserver_log("[PROVISION] Setting WiFi: %s", ssid);
 
+    // Save WiFi credentials
     esp_err_t err = config_set_wifi_sta(ssid, password);
+
+    // Save provision code if provided (will be sent with first MQTT status)
+    if (err == ESP_OK && provision_code != NULL) {
+        esp_err_t code_err = config_set_provision_code(provision_code);
+        if (code_err == ESP_OK) {
+            ESP_LOGI(TAG, "Provision code saved: %s", provision_code);
+            webserver_log("[PROVISION] Code saved: %s", provision_code);
+        } else {
+            ESP_LOGW(TAG, "Failed to save provision code: %s", esp_err_to_name(code_err));
+        }
+    }
+
     cJSON_Delete(body);
 
     cJSON *json = cJSON_CreateObject();

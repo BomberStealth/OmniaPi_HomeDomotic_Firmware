@@ -38,7 +38,7 @@
 
 static const char *TAG = "main";
 
-#define FIRMWARE_VERSION "1.8.7-idf"
+#define FIRMWARE_VERSION "1.9.0-idf"
 
 // Task intervals
 #define HEARTBEAT_INTERVAL_MS   1000    // ESP-NOW heartbeat every 1s

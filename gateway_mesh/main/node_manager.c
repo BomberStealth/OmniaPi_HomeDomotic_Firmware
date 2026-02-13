@@ -131,6 +131,8 @@ esp_err_t node_manager_update_info(const uint8_t *mac, const payload_heartbeat_a
     node->mesh_layer = info->mesh_layer;
     node->rssi = info->rssi;
     node->last_seen = esp_timer_get_time() / 1000;
+    // Node sending heartbeat_ack on production mesh is commissioned
+    node->commissioned = true;
 
     // Parse firmware version from packed uint32_t (major<<16 | minor<<8 | patch)
     snprintf(node->firmware_version, sizeof(node->firmware_version),
@@ -140,4 +142,39 @@ esp_err_t node_manager_update_info(const uint8_t *mac, const payload_heartbeat_a
              (unsigned long)(info->firmware_version & 0xFF));
 
     return ESP_OK;
+}
+
+esp_err_t node_manager_update_from_announce(const uint8_t *mac, const payload_node_announce_t *announce)
+{
+    if (mac == NULL || announce == NULL) return ESP_ERR_INVALID_ARG;
+
+    int idx = find_node_index(mac);
+    if (idx < 0) return ESP_ERR_NOT_FOUND;
+
+    node_info_t *node = &s_nodes[idx];
+    node->device_type = announce->device_type;
+    node->commissioned = announce->commissioned ? true : false;
+
+    // Parse firmware version from packed uint32_t
+    snprintf(node->firmware_version, sizeof(node->firmware_version),
+             "%lu.%lu.%lu",
+             (unsigned long)((announce->firmware_version >> 16) & 0xFF),
+             (unsigned long)((announce->firmware_version >> 8) & 0xFF),
+             (unsigned long)(announce->firmware_version & 0xFF));
+
+    ESP_LOGI(TAG, "Node updated from announce: %02X:%02X:%02X:%02X:%02X:%02X type=%d fw=%s commissioned=%d",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
+             node->device_type, node->firmware_version, node->commissioned);
+
+    return ESP_OK;
+}
+
+int node_manager_clear_all(void)
+{
+    int count = s_node_count;
+    memset(s_nodes, 0, sizeof(s_nodes));
+    s_node_count = 0;
+
+    ESP_LOGW(TAG, "Factory reset: cleared %d nodes from memory", count);
+    return count;
 }
