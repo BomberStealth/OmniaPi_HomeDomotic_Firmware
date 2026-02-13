@@ -25,6 +25,8 @@ typedef struct {
     char    firmware_version[16];
     uint32_t last_seen;
     bool    commissioned;
+    int8_t  relay1;    // -1=unknown, 0=off, 1=on
+    int8_t  relay2;    // -1=unknown, 0=off, 1=on
 } node_info_t;
 
 esp_err_t node_manager_init(void);

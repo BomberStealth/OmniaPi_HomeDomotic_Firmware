@@ -52,6 +52,8 @@ esp_err_t node_manager_add_node(const uint8_t *mac)
     node->status = NODE_STATUS_ONLINE;
     node->last_seen = esp_timer_get_time() / 1000;
     node->device_type = DEVICE_TYPE_UNKNOWN;
+    node->relay1 = -1;  // unknown
+    node->relay2 = -1;  // unknown
     s_node_count++;
 
     ESP_LOGI(TAG, "Node added: %02X:%02X:%02X:%02X:%02X:%02X (total: %d)",

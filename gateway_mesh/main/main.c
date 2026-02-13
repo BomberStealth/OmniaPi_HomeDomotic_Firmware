@@ -209,8 +209,39 @@ static void mesh_rx_handler(const uint8_t *src_mac, const uint8_t *data, size_t 
         // Relay/LED status updates
         case MSG_RELAY_STATUS: {
             const payload_relay_status_t *status = (const payload_relay_status_t *)msg->payload;
-            ESP_LOGI(TAG, "Relay status: ch=%d state=%d", status->channel, status->state);
-            // TODO: Forward to MQTT
+            ESP_LOGI(TAG, "Relay status from %02X:%02X:%02X:%02X:%02X:%02X: ch=%d state=%d",
+                     src_mac[0], src_mac[1], src_mac[2], src_mac[3], src_mac[4], src_mac[5],
+                     status->channel, status->state);
+
+            // Update relay state in node_manager
+            node_info_t *relay_node = node_manager_get_node(src_mac);
+            if (relay_node) {
+                if (status->channel == 0) {
+                    relay_node->relay1 = status->state ? 1 : 0;
+                } else if (status->channel == 1) {
+                    relay_node->relay2 = status->state ? 1 : 0;
+                }
+
+                // Build JSON with known relay states and forward to MQTT
+                char state_json[96];
+                if (relay_node->relay1 >= 0 && relay_node->relay2 >= 0) {
+                    snprintf(state_json, sizeof(state_json),
+                             "{\"relay1\":%d,\"relay2\":%d}",
+                             relay_node->relay1, relay_node->relay2);
+                } else if (relay_node->relay1 >= 0) {
+                    snprintf(state_json, sizeof(state_json),
+                             "{\"relay1\":%d}", relay_node->relay1);
+                } else if (relay_node->relay2 >= 0) {
+                    snprintf(state_json, sizeof(state_json),
+                             "{\"relay2\":%d}", relay_node->relay2);
+                } else {
+                    break;  // No known state to publish
+                }
+
+                if (s_state.mqtt_connected) {
+                    mqtt_publish_node_state(src_mac, state_json);
+                }
+            }
             break;
         }
 
