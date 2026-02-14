@@ -98,9 +98,14 @@ esp_err_t ble_prov_start(void)
     ESP_ERROR_CHECK(esp_event_handler_register(
         IP_EVENT, IP_EVENT_STA_GOT_IP, &prov_event_handler, NULL));
 
-    // Initialize WiFi (needed for provisioning to work)
+    // Create default WiFi STA interface (needed for WiFi scan during provisioning)
+    esp_netif_create_default_wifi_sta();
+
+    // Initialize and start WiFi in STA mode (required for prov-scan endpoint)
     wifi_init_config_t wifi_init_cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&wifi_init_cfg));
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_start());
 
     // Initialize provisioning manager with BLE transport
     wifi_prov_mgr_config_t config = {
@@ -142,7 +147,8 @@ esp_err_t ble_prov_start(void)
         NULL
     ));
 
-    ESP_LOGI(TAG, "BLE provisioning active - use OmniaPi app or ESP BLE Prov app");
+    ESP_LOGI(TAG, "BLE provisioning active (with WiFi scan support)");
+    ESP_LOGI(TAG, "Endpoints: prov-session, prov-config, prov-scan, proto-ver");
     ESP_LOGI(TAG, "Free heap: %lu bytes", esp_get_free_heap_size());
 
     // Wait for provisioning to complete (blocks)
