@@ -22,7 +22,6 @@
 
 static const char *TAG = "BLE_PROV";
 
-#define PROV_POP         "omniapi"
 #define WIFI_MAX_RETRY   3
 #define WIFI_CONNECT_TIMEOUT_MS  10000
 
@@ -126,7 +125,7 @@ esp_err_t ble_prov_start(void)
     snprintf(ble_name, sizeof(ble_name), "OmniaPi-%02X%02X", mac[4], mac[5]);
 
     ESP_LOGI(TAG, "BLE device name: %s", ble_name);
-    ESP_LOGI(TAG, "Proof of Possession: %s", PROV_POP);
+    ESP_LOGI(TAG, "Security: sec0 (no encryption)");
 
     // Set BLE service UUID (custom for OmniaPi)
     uint8_t custom_service_uuid[] = {
@@ -135,12 +134,12 @@ esp_err_t ble_prov_start(void)
     };
     wifi_prov_scheme_ble_set_service_uuid(custom_service_uuid);
 
-    // Start provisioning with security (SRP with PoP)
+    // Start provisioning without security (sec0 - no encryption)
     ESP_ERROR_CHECK(wifi_prov_mgr_start_provisioning(
-        WIFI_PROV_SECURITY_1,
-        PROV_POP,
+        WIFI_PROV_SECURITY_0,
+        NULL,
         ble_name,
-        NULL  // No specific service key
+        NULL
     ));
 
     ESP_LOGI(TAG, "BLE provisioning active - use OmniaPi app or ESP BLE Prov app");
