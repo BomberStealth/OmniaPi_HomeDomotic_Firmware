@@ -16,6 +16,7 @@ idf_component_register(
         "webserver.c"
         "web_api.c"
         "status_led.c"
+        "ble_prov.c"
     INCLUDE_DIRS
         "."
     REQUIRES
@@ -32,4 +33,7 @@ idf_component_register(
         esp_timer
         json
         mbedtls
+        wifi_provisioning
+        protocomm
+        bt
 )

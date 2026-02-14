@@ -41,6 +41,7 @@
 #include "webserver.h"
 #include "web_api.h"
 #include "status_led.h"
+#include "ble_prov.h"
 
 static const char *TAG = "GATEWAY_MAIN";
 
@@ -503,9 +504,7 @@ static esp_err_t start_provisioning_ap(void)
     ESP_LOGI(TAG, "  Password: omniapi123");
     ESP_LOGI(TAG, "  Connect and go to http://192.168.4.1");
 
-    // Init TCP/IP and event loop
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    // Note: esp_netif_init() and esp_event_loop_create_default() already called by caller
 
     // Create default AP and STA netifs (APSTA mode needed for WiFi scan)
     esp_netif_create_default_wifi_ap();
@@ -648,13 +647,42 @@ void app_main(void)
     ESP_LOGI(TAG, "OTA partition marked as valid");
 
     // ================================================================
-    // Check provisioning state - SoftAP if unconfigured
+    // Check provisioning state
     // ================================================================
     provision_state_t prov_state = config_get_provision_state();
 
     if (prov_state == PROVISION_STATE_UNCONFIGURED) {
-        ESP_LOGW(TAG, "Gateway NOT configured - starting provisioning SoftAP");
+        ESP_LOGW(TAG, "Gateway NOT configured - checking connectivity options...");
         status_led_set(STATUS_LED_SEARCHING);
+
+        // Init TCP/IP stack for Ethernet check
+        ESP_ERROR_CHECK(esp_netif_init());
+        ESP_ERROR_CHECK(esp_event_loop_create_default());
+
+        // Quick Ethernet check: try init + brief wait for link
+        esp_err_t eth_check = eth_manager_init();
+        bool eth_link = false;
+        if (eth_check == ESP_OK) {
+            eth_manager_start();
+            // Wait up to 3 seconds for Ethernet link
+            for (int i = 0; i < 30; i++) {
+                vTaskDelay(pdMS_TO_TICKS(100));
+                if (s_state.eth_connected) {
+                    eth_link = true;
+                    break;
+                }
+            }
+        }
+
+        if (ble_prov_needed(eth_link)) {
+            // No Ethernet, no WiFi creds → BLE provisioning
+            ESP_LOGW(TAG, "Starting BLE WiFi provisioning...");
+            ble_prov_start();  // Blocks until done, then reboots
+            return;  // Never reached
+        }
+
+        // Ethernet available or WiFi creds exist → SoftAP provisioning for MQTT config
+        ESP_LOGW(TAG, "Starting SoftAP provisioning for MQTT configuration...");
 
         // Start SoftAP for provisioning
         ESP_ERROR_CHECK(start_provisioning_ap());
@@ -668,7 +696,6 @@ void app_main(void)
         }
 
         // Start captive portal DNS server (redirects all domains to 192.168.4.1)
-        // This triggers "Sign in to network" notification on phones/laptops
         xTaskCreate(captive_dns_task, "captive_dns", 3072, NULL, 5, NULL);
 
         ESP_LOGI(TAG, "Waiting for configuration via API...");
