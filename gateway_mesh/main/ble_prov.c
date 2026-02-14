@@ -118,9 +118,30 @@ esp_err_t ble_prov_start(void)
     bool provisioned = false;
     wifi_prov_mgr_is_provisioned(&provisioned);
     if (provisioned) {
-        ESP_LOGI(TAG, "Already provisioned - deinit and continue");
+        ESP_LOGI(TAG, "Already provisioned via BLE - reading stored WiFi credentials...");
+
+        // WiFi is already initialized and running (STA mode from above)
+        // Read credentials stored by wifi_prov_mgr in WiFi's NVS namespace
+        wifi_config_t wifi_cfg;
+        esp_wifi_get_config(WIFI_IF_STA, &wifi_cfg);
+
+        if (strlen((char *)wifi_cfg.sta.ssid) > 0) {
+            // Save to config_manager so next boot has prov_state = WIFI_ONLY
+            config_set_wifi_sta((char *)wifi_cfg.sta.ssid, (char *)wifi_cfg.sta.password);
+            ESP_LOGI(TAG, "WiFi credentials saved to config: SSID=%s", wifi_cfg.sta.ssid);
+        } else {
+            // Edge case: provisioned flag set but no creds - reset so BLE prov can re-run
+            ESP_LOGW(TAG, "No WiFi creds found despite provisioned flag - resetting provisioning");
+            wifi_prov_mgr_reset_provisioning();
+        }
+
         wifi_prov_mgr_deinit();
-        return ESP_OK;
+
+        // Reboot to restart app_main with correct provision state
+        ESP_LOGI(TAG, "Rebooting to apply WiFi credentials...");
+        vTaskDelay(pdMS_TO_TICKS(500));
+        esp_restart();
+        return ESP_OK;  // Never reached
     }
 
     // Generate BLE device name: "OmniaPi-XXXX"
