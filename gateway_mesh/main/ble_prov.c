@@ -10,7 +10,9 @@
 #include "nvs_storage.h"
 
 #include <string.h>
+#include <stdlib.h>
 #include "esp_log.h"
+#include "cJSON.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_mac.h"
@@ -62,6 +64,65 @@ static void prov_event_handler(void *arg, esp_event_base_t event_base,
         // WiFi connected via provisioning - save and reboot
         ESP_LOGI(TAG, "WiFi connected after provisioning - saving and rebooting...");
     }
+}
+
+// ============================================================================
+// Custom BLE Endpoint: MQTT Configuration
+// ============================================================================
+
+/**
+ * Handler for "custom-mqtt" BLE endpoint.
+ * Receives JSON: {"broker":"mqtt://192.168.1.252:1883"}
+ * Saves MQTT broker URI to NVS via config_manager.
+ */
+static esp_err_t custom_mqtt_handler(uint32_t session_id, const uint8_t *inbuf, ssize_t inlen,
+                                      uint8_t **outbuf, ssize_t *outlen, void *priv_data)
+{
+    if (inbuf == NULL || inlen <= 0) {
+        ESP_LOGE(TAG, "custom-mqtt: empty input");
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "custom-mqtt: received %d bytes", (int)inlen);
+
+    cJSON *json = cJSON_ParseWithLength((const char *)inbuf, inlen);
+    if (json == NULL) {
+        ESP_LOGE(TAG, "custom-mqtt: invalid JSON");
+        const char *resp = "{\"status\":\"error\",\"message\":\"invalid JSON\"}";
+        *outlen = strlen(resp);
+        *outbuf = malloc(*outlen);
+        memcpy(*outbuf, resp, *outlen);
+        return ESP_OK;
+    }
+
+    cJSON *broker = cJSON_GetObjectItem(json, "broker");
+    if (!broker || !cJSON_IsString(broker) || strlen(broker->valuestring) == 0) {
+        ESP_LOGE(TAG, "custom-mqtt: missing 'broker' field");
+        cJSON_Delete(json);
+        const char *resp = "{\"status\":\"error\",\"message\":\"missing broker\"}";
+        *outlen = strlen(resp);
+        *outbuf = malloc(*outlen);
+        memcpy(*outbuf, resp, *outlen);
+        return ESP_OK;
+    }
+
+    esp_err_t err = config_set_mqtt(broker->valuestring, NULL, NULL);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "MQTT broker URI saved: %s", broker->valuestring);
+        const char *resp = "{\"status\":\"ok\"}";
+        *outlen = strlen(resp);
+        *outbuf = malloc(*outlen);
+        memcpy(*outbuf, resp, *outlen);
+    } else {
+        ESP_LOGE(TAG, "Failed to save MQTT config: %s", esp_err_to_name(err));
+        const char *resp = "{\"status\":\"error\",\"message\":\"save failed\"}";
+        *outlen = strlen(resp);
+        *outbuf = malloc(*outlen);
+        memcpy(*outbuf, resp, *outlen);
+    }
+
+    cJSON_Delete(json);
+    return ESP_OK;
 }
 
 // ============================================================================
@@ -160,6 +221,9 @@ esp_err_t ble_prov_start(void)
     };
     wifi_prov_scheme_ble_set_service_uuid(custom_service_uuid);
 
+    // Create custom endpoint BEFORE starting provisioning
+    ESP_ERROR_CHECK(wifi_prov_mgr_endpoint_create("custom-mqtt"));
+
     // Start provisioning without security (sec0 - no encryption)
     ESP_ERROR_CHECK(wifi_prov_mgr_start_provisioning(
         WIFI_PROV_SECURITY_0,
@@ -168,8 +232,12 @@ esp_err_t ble_prov_start(void)
         NULL
     ));
 
-    ESP_LOGI(TAG, "BLE provisioning active (with WiFi scan support)");
-    ESP_LOGI(TAG, "Endpoints: prov-session, prov-config, prov-scan, proto-ver");
+    // Register custom endpoint handler AFTER starting provisioning
+    ESP_ERROR_CHECK(wifi_prov_mgr_endpoint_register(
+        "custom-mqtt", custom_mqtt_handler, NULL));
+
+    ESP_LOGI(TAG, "BLE provisioning active (with WiFi scan + MQTT config)");
+    ESP_LOGI(TAG, "Endpoints: prov-session, prov-config, prov-scan, proto-ver, custom-mqtt");
     ESP_LOGI(TAG, "Free heap: %lu bytes", esp_get_free_heap_size());
 
     // Wait for provisioning to complete (blocks)

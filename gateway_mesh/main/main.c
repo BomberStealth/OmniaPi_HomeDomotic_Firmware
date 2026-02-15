@@ -651,12 +651,8 @@ void app_main(void)
     // ================================================================
     provision_state_t prov_state = config_get_provision_state();
 
-    if (prov_state != PROVISION_STATE_CONFIGURED) {
-        if (prov_state == PROVISION_STATE_WIFI_ONLY) {
-            ESP_LOGW(TAG, "WiFi configured but MQTT not configured - need SoftAP for MQTT setup");
-        } else {
-            ESP_LOGW(TAG, "Gateway NOT configured - checking connectivity options...");
-        }
+    if (prov_state == PROVISION_STATE_UNCONFIGURED) {
+        ESP_LOGW(TAG, "Gateway NOT configured - checking connectivity options...");
         status_led_set(STATUS_LED_SEARCHING);
 
         // Init TCP/IP stack for Ethernet check
@@ -713,6 +709,9 @@ void app_main(void)
     // Normal operation - gateway is configured
     // ================================================================
     ESP_LOGI(TAG, "Gateway configured (state=%d) - starting normal operation", prov_state);
+    if (prov_state == PROVISION_STATE_WIFI_ONLY) {
+        ESP_LOGW(TAG, "MQTT not configured - will start without MQTT, configure via web API");
+    }
     status_led_set(STATUS_LED_SEARCHING);
 
     // Initialize network (Ethernet + WiFi dual connectivity)
