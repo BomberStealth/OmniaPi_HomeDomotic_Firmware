@@ -169,8 +169,18 @@ esp_err_t mqtt_handler_init(void)
     // Get MQTT config from config_manager (NVS with Kconfig fallback)
     const config_mqtt_t *mqtt_config = config_get_mqtt();
 
+    ESP_LOGI(TAG, ">>> MQTT Broker URI: [%s] (configured=%s)",
+             mqtt_config->broker_uri,
+             mqtt_config->configured ? "YES" : "NO/defaults");
+
+    if (strlen(mqtt_config->broker_uri) == 0) {
+        ESP_LOGE(TAG, "MQTT broker URI is EMPTY - cannot start MQTT");
+        return ESP_FAIL;
+    }
+
     esp_mqtt_client_config_t mqtt_cfg = {
         .broker.address.uri = mqtt_config->broker_uri,
+        .broker.address.transport = MQTT_TRANSPORT_OVER_TCP,
         .credentials.username = mqtt_config->username,
         .credentials.authentication.password = mqtt_config->password,
         .credentials.client_id = mqtt_config->client_id,
@@ -194,9 +204,8 @@ esp_err_t mqtt_handler_init(void)
 
     esp_mqtt_client_register_event(s_client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
 
-    ESP_LOGI(TAG, "MQTT initialized, broker: %s (configured: %s), MAC: %s",
-             mqtt_config->broker_uri, mqtt_config->configured ? "YES" : "NO/defaults",
-             s_mac_str);
+    ESP_LOGI(TAG, "MQTT initialized (forced TCP), broker: %s, MAC: %s",
+             mqtt_config->broker_uri, s_mac_str);
     return ESP_OK;
 }
 
