@@ -180,7 +180,6 @@ esp_err_t mqtt_handler_init(void)
 
     esp_mqtt_client_config_t mqtt_cfg = {
         .broker.address.uri = mqtt_config->broker_uri,
-        .broker.address.transport = MQTT_TRANSPORT_OVER_TCP,
         .credentials.username = mqtt_config->username,
         .credentials.authentication.password = mqtt_config->password,
         .credentials.client_id = mqtt_config->client_id,
@@ -204,7 +203,7 @@ esp_err_t mqtt_handler_init(void)
 
     esp_mqtt_client_register_event(s_client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
 
-    ESP_LOGI(TAG, "MQTT initialized (forced TCP), broker: %s, MAC: %s",
+    ESP_LOGI(TAG, "MQTT initialized, broker: %s, MAC: %s",
              mqtt_config->broker_uri, s_mac_str);
     return ESP_OK;
 }

@@ -744,8 +744,16 @@ void app_main(void)
     ESP_LOGI(TAG, "Mesh state set: started=true, is_root=true");
 
     // Initialize and start MQTT (after network is ready)
-    ESP_ERROR_CHECK(mqtt_handler_init());
-    ESP_ERROR_CHECK(mqtt_handler_start());
+    // Non-fatal: gateway continues without MQTT if init fails (e.g. empty URI)
+    esp_err_t mqtt_err = mqtt_handler_init();
+    if (mqtt_err == ESP_OK) {
+        mqtt_err = mqtt_handler_start();
+        if (mqtt_err != ESP_OK) {
+            ESP_LOGE(TAG, "MQTT start failed: %s - continuing without MQTT", esp_err_to_name(mqtt_err));
+        }
+    } else {
+        ESP_LOGE(TAG, "MQTT init failed: %s - continuing without MQTT", esp_err_to_name(mqtt_err));
+    }
 
     // Initialize commissioning handler
     ESP_ERROR_CHECK(commissioning_init());
