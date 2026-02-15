@@ -233,19 +233,19 @@ bool mqtt_handler_is_connected(void)
 esp_err_t mqtt_handler_suspend(void)
 {
     if (s_client == NULL) return ESP_ERR_INVALID_STATE;
-    ESP_LOGW(TAG, "MQTT SUSPENDED - stopping client for mesh switch");
+    ESP_LOGW(TAG, "MQTT SUSPENDED - disconnecting for mesh switch");
     s_mqtt_suspended = true;
     s_connected = false;
-    esp_mqtt_client_stop(s_client);
+    esp_mqtt_client_disconnect(s_client);
     return ESP_OK;
 }
 
 esp_err_t mqtt_handler_resume(void)
 {
     if (s_client == NULL) return ESP_ERR_INVALID_STATE;
-    ESP_LOGW(TAG, "MQTT RESUMED - restarting client after mesh switch");
+    ESP_LOGW(TAG, "MQTT RESUMED - reconnecting after mesh switch");
     s_mqtt_suspended = false;
-    esp_mqtt_client_start(s_client);
+    esp_mqtt_client_reconnect(s_client);
     return ESP_OK;
 }
 
