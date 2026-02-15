@@ -243,9 +243,13 @@ esp_err_t mqtt_handler_suspend(void)
 esp_err_t mqtt_handler_resume(void)
 {
     if (s_client == NULL) return ESP_ERR_INVALID_STATE;
-    ESP_LOGW(TAG, "MQTT RESUMED - reconnecting after mesh switch");
     s_mqtt_suspended = false;
-    esp_mqtt_client_reconnect(s_client);
+    // Stop completely to reset stale transport/socket after mesh switch
+    esp_mqtt_client_stop(s_client);
+    vTaskDelay(pdMS_TO_TICKS(500));
+    // Fresh start with clean transport
+    esp_mqtt_client_start(s_client);
+    ESP_LOGW(TAG, "MQTT RESUMED - stop+start for clean reconnect");
     return ESP_OK;
 }
 

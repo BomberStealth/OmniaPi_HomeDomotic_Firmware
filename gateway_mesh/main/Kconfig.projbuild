@@ -131,7 +131,7 @@ menu "OmniaPi Gateway Mesh Configuration"
     menu "Gateway Settings"
         config GATEWAY_FIRMWARE_VERSION
             string "Firmware Version"
-            default "1.19.0"
+            default "1.19.1"
             help
                 Gateway firmware version string.
 
