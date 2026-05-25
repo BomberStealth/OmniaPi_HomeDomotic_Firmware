@@ -26,6 +26,7 @@
 #include "esp_ota_ops.h"
 
 #include "lwip/sockets.h"
+#include "driver/gpio.h"
 
 #include "omniapi_protocol.h"
 #include "mesh_network.h"
@@ -421,6 +422,46 @@ void on_mesh_child_disconnected(const uint8_t *mac)
 // Initialization
 // ============================================================================
 
+#define FACTORY_RESET_GPIO      4       // GPIO4, exposed on WT32-ETH01, supports pull-up
+#define FACTORY_RESET_HOLD_MS   5000    // Hold 5 seconds anytime to trigger reset
+
+static void factory_reset_task(void *pvParameters)
+{
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << FACTORY_RESET_GPIO),
+        .mode         = GPIO_MODE_INPUT,
+        .pull_up_en   = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type    = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&io_conf);
+
+    int held_ms = 0;
+
+    while (1) {
+        if (gpio_get_level(FACTORY_RESET_GPIO) == 0) {
+            held_ms += 100;
+            if (held_ms == 1000) {
+                ESP_LOGW(TAG, "Factory reset button held - keep holding for %d more seconds...",
+                         (FACTORY_RESET_HOLD_MS - held_ms) / 1000);
+            }
+            if (held_ms >= FACTORY_RESET_HOLD_MS) {
+                ESP_LOGW(TAG, ">>> FACTORY RESET TRIGGERED VIA GPIO%d <<<", FACTORY_RESET_GPIO);
+                status_led_set(STATUS_LED_ERROR);
+                config_factory_reset();
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                esp_restart();
+            }
+        } else {
+            if (held_ms > 0) {
+                ESP_LOGI(TAG, "Factory reset cancelled (held %d ms)", held_ms);
+            }
+            held_ms = 0;
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+}
+
 static void print_banner(void)
 {
     ESP_LOGI(TAG, "");
@@ -776,6 +817,7 @@ void app_main(void)
     xTaskCreate(gateway_task, "gateway_task", 4096, NULL, 5, NULL);
     xTaskCreate(heartbeat_task, "heartbeat_task", 4096, NULL, 4, NULL);
     xTaskCreate(status_task, "status_task", 4096, NULL, 3, NULL);
+    xTaskCreate(factory_reset_task, "factory_reset", 2048, NULL, 2, NULL);
 
     ESP_LOGI(TAG, "Gateway initialization complete");
     ESP_LOGI(TAG, "  Ethernet: %s (netif=%p)", s_eth_init_ok ? "INIT OK" : "INIT FAILED", eth_manager_get_netif());

@@ -463,17 +463,11 @@ esp_err_t config_factory_reset(void)
 {
     ESP_LOGW(TAG, "Performing factory reset - clearing all NVS configuration");
 
-    // Erase all config keys
-    nvs_storage_erase(NVS_KEY_WIFI_SSID);
-    nvs_storage_erase(NVS_KEY_WIFI_PASS);
-    nvs_storage_erase(NVS_KEY_MQTT_URI);
-    nvs_storage_erase(NVS_KEY_MQTT_USER);
-    nvs_storage_erase(NVS_KEY_MQTT_PASS);
-    nvs_storage_erase(NVS_KEY_MQTT_CLIENT);
-    nvs_storage_erase(NVS_KEY_MESH_PASS);
-    nvs_storage_erase(NVS_KEY_MESH_CHANNEL);
-    nvs_storage_erase(NVS_KEY_PROVISIONED);
-    nvs_storage_erase(NVS_KEY_PROVISION_CODE);
+    // Erase entire omniapi namespace
+    nvs_storage_erase_all();
+
+    // Also clear WiFi stack's own NVS cache (set by esp_wifi_set_config)
+    esp_wifi_restore();
 
     ESP_LOGW(TAG, "Factory reset complete - restart to apply");
     return ESP_OK;
