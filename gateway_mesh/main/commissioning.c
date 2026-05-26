@@ -47,9 +47,15 @@ static char s_network_key[33] = {0};
 static char s_plant_id[33] = {0};
 static bool s_credentials_set = false;
 
-// Commission ACK tracking
+// Commission ACK tracking (single-node legacy flow)
 static volatile bool s_commission_ack_received = false;
 static volatile bool s_commission_ack_success = false;
+
+// Batch commission ACK tracking
+static volatile int  s_batch_slot_count = 0;
+static volatile uint8_t s_batch_ack_macs[MAX_BATCH_NODES][6];
+static volatile bool s_batch_ack_received[MAX_BATCH_NODES];
+static volatile bool s_batch_ack_success[MAX_BATCH_NODES];
 
 // ============================================================================
 // Forward Declarations
@@ -59,6 +65,9 @@ static int find_scan_result_by_mac(const uint8_t *mac);
 static void cleanup_old_results(void);
 static void scan_start_task(void *pvParameters);
 static void scan_stop_task(void *pvParameters);
+
+// Declared in mqtt_handler.h - forward declare here to avoid circular include
+esp_err_t mqtt_publish_commission_batch_result(const batch_result_t *results, int count);
 
 // Task handle for async scan operations
 static TaskHandle_t s_scan_task_handle = NULL;
@@ -847,6 +856,155 @@ esp_err_t commissioning_remove_node(const uint8_t *mac)
     return mesh_network_send(addr.addr, (uint8_t *)&msg, OMNIAPI_MSG_SIZE(sizeof(payload_decommission_t)));
 }
 
+esp_err_t commissioning_add_nodes_batch(const batch_node_t *nodes, int count)
+{
+    if (nodes == NULL || count <= 0 || count > MAX_BATCH_NODES) return ESP_ERR_INVALID_ARG;
+    if (!s_credentials_set) return ESP_ERR_INVALID_STATE;
+
+    ESP_LOGI(TAG, "=== BATCH COMMISSION START: %d nodes ===", count);
+
+    bool node_found[MAX_BATCH_NODES];
+    batch_result_t results[MAX_BATCH_NODES];
+    memset(node_found, 0, sizeof(node_found));
+    memset(results, 0, sizeof(results));
+    for (int i = 0; i < count; i++) {
+        memcpy(results[i].mac, nodes[i].mac, 6);
+    }
+
+    // --- PHASE 1: Switch to discovery mesh ONCE ---
+    mqtt_handler_suspend();
+
+    esp_err_t ret = mesh_network_stop();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Batch: failed to stop mesh");
+        mqtt_handler_resume();
+        return ret;
+    }
+    vTaskDelay(pdMS_TO_TICKS(MESH_SWITCH_DELAY_MS));
+
+    ret = mesh_network_start_with_id(MESH_ID_DISC, MESH_PASSWORD_DISCOVERY);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Batch: failed to start discovery mesh");
+        mesh_network_start_with_id(MESH_ID_PROD, MESH_PASSWORD_PRODUCTION);
+        vTaskDelay(pdMS_TO_TICKS(2000));
+        mqtt_handler_resume();
+        return ret;
+    }
+    s_current_mode = COMMISSION_MODE_DISCOVERY;
+    vTaskDelay(pdMS_TO_TICKS(MESH_SWITCH_DELAY_MS * 2));
+
+    // --- PHASE 2: Wait for all nodes in routing table (max 10s shared) ---
+    ESP_LOGI(TAG, "Batch: waiting for nodes in discovery routing table...");
+    int ready_count = 0;
+    for (int t = 0; t < 20; t++) {  // 20 x 500ms = 10s
+        vTaskDelay(pdMS_TO_TICKS(500));
+        for (int i = 0; i < count; i++) {
+            if (!node_found[i] && mesh_network_is_node_reachable(nodes[i].mac)) {
+                node_found[i] = true;
+                results[i].found = true;
+                ready_count++;
+                ESP_LOGI(TAG, "Batch: node %d found after %d ms", i, (t + 1) * 500);
+            }
+        }
+        if (ready_count == count) break;
+    }
+    ESP_LOGI(TAG, "Batch: %d/%d nodes found in discovery mesh", ready_count, count);
+
+    // --- PHASE 3: Set up batch ACK tracking and send all commissions ---
+    s_batch_slot_count = count;
+    for (int i = 0; i < count; i++) {
+        memcpy((void *)s_batch_ack_macs[i], nodes[i].mac, 6);
+        s_batch_ack_received[i] = false;
+        s_batch_ack_success[i] = false;
+    }
+
+    for (int i = 0; i < count; i++) {
+        if (!node_found[i]) {
+            ESP_LOGW(TAG, "Batch: skipping node %d - not in discovery mesh", i);
+            continue;
+        }
+
+        omniapi_message_t msg;
+        OMNIAPI_INIT_HEADER(&msg.header, MSG_COMMISSION, ++s_current_seq, sizeof(payload_commission_t));
+        payload_commission_t *cmd = (payload_commission_t *)msg.payload;
+        memcpy(cmd->mac, nodes[i].mac, 6);
+        memcpy(cmd->network_id, s_network_id, 6);
+        strncpy(cmd->network_key, s_network_key, 32);
+        strncpy(cmd->plant_id, s_plant_id, 32);
+        if (nodes[i].name[0] != '\0') {
+            strncpy(cmd->node_name, nodes[i].name, 32);
+        } else {
+            snprintf(cmd->node_name, 32, "Node_%02X%02X%02X",
+                     nodes[i].mac[3], nodes[i].mac[4], nodes[i].mac[5]);
+        }
+
+        ret = mesh_network_send((uint8_t *)nodes[i].mac, (uint8_t *)&msg,
+                                OMNIAPI_MSG_SIZE(sizeof(payload_commission_t)));
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "Batch: failed to send to node %d: %s", i, esp_err_to_name(ret));
+            node_found[i] = false;
+            results[i].found = false;
+        } else {
+            ESP_LOGI(TAG, "Batch: commission sent to node %d", i);
+        }
+        vTaskDelay(pdMS_TO_TICKS(200));  // gap between sends
+    }
+
+    // --- PHASE 4: Wait for all ACKs (5s total) ---
+    ESP_LOGI(TAG, "Batch: waiting for ACKs (5s)...");
+    for (int t = 0; t < 25; t++) {  // 25 x 200ms = 5s
+        vTaskDelay(pdMS_TO_TICKS(200));
+        bool all_done = true;
+        for (int i = 0; i < count; i++) {
+            if (results[i].found && !s_batch_ack_received[i]) {
+                all_done = false;
+                break;
+            }
+        }
+        if (all_done) {
+            ESP_LOGI(TAG, "Batch: all ACKs collected after %d ms", (t + 1) * 200);
+            break;
+        }
+    }
+    s_batch_slot_count = 0;
+
+    // --- PHASE 5: Switch back to production mesh ONCE ---
+    ESP_LOGI(TAG, "Batch: switching back to production mesh...");
+    mesh_network_stop();
+    vTaskDelay(pdMS_TO_TICKS(MESH_SWITCH_DELAY_MS));
+    mesh_network_start_with_id(MESH_ID_PROD, MESH_PASSWORD_PRODUCTION);
+    s_current_mode = COMMISSION_MODE_PRODUCTION;
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    mqtt_handler_resume();
+
+    if (!wait_mqtt_connected()) {
+        ESP_LOGE(TAG, "Batch: MQTT not connected after commission - cannot publish results");
+        return ESP_FAIL;
+    }
+
+    // --- PHASE 6: Verify nodes on production mesh (max 12s) ---
+    ESP_LOGI(TAG, "Batch: verifying nodes on production mesh...");
+    int verified_count = 0;
+    for (int t = 0; t < 24 && verified_count < ready_count; t++) {  // 24 x 500ms = 12s
+        vTaskDelay(pdMS_TO_TICKS(500));
+        for (int i = 0; i < count; i++) {
+            if (results[i].ok || !results[i].found) continue;
+            if (mesh_network_is_node_reachable(nodes[i].mac)) {
+                results[i].ok = true;
+                verified_count++;
+                node_manager_add_node(nodes[i].mac);
+                ESP_LOGI(TAG, "Batch: node %d VERIFIED on production mesh!", i);
+            }
+        }
+    }
+    ESP_LOGI(TAG, "=== BATCH COMPLETE: %d/%d verified ===", verified_count, count);
+
+    // --- PHASE 7: Publish batch result ---
+    mqtt_publish_commission_batch_result(results, count);
+
+    return ESP_OK;
+}
+
 // ============================================================================
 // ACK Handling
 // ============================================================================
@@ -872,6 +1030,15 @@ void commissioning_handle_commission_ack(const uint8_t *src_mac, const omniapi_m
         // (MQTT is likely suspended during mesh switch, so we can't publish here)
         s_commission_ack_received = true;
         s_commission_ack_success = true;
+
+        // Also update batch tracking if a batch is in progress
+        for (int i = 0; i < s_batch_slot_count; i++) {
+            if (memcmp((const void *)s_batch_ack_macs[i], ack->mac, 6) == 0) {
+                s_batch_ack_received[i] = true;
+                s_batch_ack_success[i] = true;
+                break;
+            }
+        }
     } else {
         ESP_LOGW(TAG, "Commission ACK (FAILED) from %02X:%02X:%02X:%02X:%02X:%02X status=%d",
                  ack->mac[0], ack->mac[1], ack->mac[2],
@@ -879,6 +1046,14 @@ void commissioning_handle_commission_ack(const uint8_t *src_mac, const omniapi_m
 
         s_commission_ack_received = true;
         s_commission_ack_success = false;
+
+        for (int i = 0; i < s_batch_slot_count; i++) {
+            if (memcmp((const void *)s_batch_ack_macs[i], ack->mac, 6) == 0) {
+                s_batch_ack_received[i] = true;
+                s_batch_ack_success[i] = false;
+                break;
+            }
+        }
     }
 }
 

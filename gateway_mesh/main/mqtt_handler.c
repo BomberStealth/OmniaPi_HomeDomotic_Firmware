@@ -94,6 +94,8 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
             esp_mqtt_client_subscribe(s_client, gw_sub_buf, 1);
             snprintf(gw_sub_buf, sizeof(gw_sub_buf), "omniapi/gateway/%s/commission/batch", s_mac_topic);
             esp_mqtt_client_subscribe(s_client, gw_sub_buf, 1);
+            snprintf(gw_sub_buf, sizeof(gw_sub_buf), "omniapi/gateway/%s/ota/#", s_mac_topic);
+            esp_mqtt_client_subscribe(s_client, gw_sub_buf, 1);
             // Also keep broadcast topics for backward compatibility with older backends
             esp_mqtt_client_subscribe(s_client, MQTT_TOPIC_CMD "/#", 1);
             esp_mqtt_client_subscribe(s_client, MQTT_TOPIC_SCAN, 1);

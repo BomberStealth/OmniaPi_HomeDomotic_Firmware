@@ -114,12 +114,40 @@ void commissioning_add_discovered_node(const uint8_t *mac, uint8_t device_type,
 // ============================================================================
 
 /**
- * Commission a node (add to network)
+ * Commission a node (add to network) - single node, legacy flow
  * @param mac       Node MAC address (6 bytes)
  * @param node_name Optional friendly name (can be NULL for auto-generated)
  * @return ESP_OK on success
  */
 esp_err_t commissioning_add_node(const uint8_t *mac, const char *node_name);
+
+// ---- Batch commissioning ----
+
+#define MAX_BATCH_NODES MAX_SCAN_RESULTS
+
+/** Input node for batch commission */
+typedef struct {
+    uint8_t mac[6];
+    char    name[33];
+} batch_node_t;
+
+/** Per-node result from batch commission */
+typedef struct {
+    uint8_t mac[6];
+    bool    ok;     // verified on production mesh
+    bool    found;  // reached in discovery mesh
+} batch_result_t;
+
+/**
+ * Commission multiple nodes in a single mesh-switch cycle.
+ * Switches to discovery once, commissions all nodes, switches back once,
+ * verifies each on production mesh, then publishes batch result via MQTT.
+ * Must be called from a FreeRTOS task (blocks up to ~20s).
+ * @param nodes Array of nodes to commission
+ * @param count Number of nodes
+ * @return ESP_OK on success
+ */
+esp_err_t commissioning_add_nodes_batch(const batch_node_t *nodes, int count);
 
 /**
  * Decommission a node (remove from network)

@@ -10,6 +10,7 @@
 
 #include "esp_err.h"
 #include "omniapi_protocol.h"
+#include "commissioning.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -140,6 +141,15 @@ esp_err_t mqtt_publish_commission_result(const uint8_t *mac, bool success, const
  * @return ESP_OK on success
  */
 esp_err_t mqtt_publish_decommission_result(const uint8_t *mac, bool success, const char *message);
+
+/**
+ * Publish batch commissioning result
+ * Publishes {"ok": ["MAC1", ...], "failed": ["MAC2", ...]} to omniapi/gateway/commission/batch/result
+ * @param results Array of per-node results
+ * @param count   Number of results
+ * @return ESP_OK on success
+ */
+esp_err_t mqtt_publish_commission_batch_result(const batch_result_t *results, int count);
 
 // ============================================================================
 // OTA Publishing
