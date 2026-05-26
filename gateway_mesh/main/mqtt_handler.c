@@ -34,6 +34,7 @@ static bool s_connected = false;
 static bool s_mqtt_suspended = false;  // Block reconnect during mesh switch
 static char s_lwt_message[64] = {0};
 static char s_mac_str[18] = "00:00:00:00:00:00";
+static char s_mac_topic[13] = "000000000000"; // MAC without colons, used in per-gateway MQTT topics
 
 // Callbacks from main.c
 extern void on_mqtt_connected(void);
@@ -44,6 +45,7 @@ extern void on_mqtt_disconnected(void);
 // ============================================================================
 static void handle_scan_command(const char *data, int data_len);
 static void handle_commission_command(const char *data, int data_len);
+static void handle_commission_batch_command(const char *data, int data_len);
 static void handle_decommission_command(const char *data, int data_len);
 static void handle_credentials_command(const char *data, int data_len);
 static void handle_identify_command(const char *data, int data_len);
@@ -53,6 +55,19 @@ static void handle_relay_command(const char *data, int data_len);
 static void handle_delete_node_command(const char *data, int data_len);
 static void handle_factory_reset_command(void);
 static bool parse_mac_address(const char *mac_str, uint8_t *mac_out);
+
+typedef struct {
+    batch_node_t nodes[MAX_BATCH_NODES];
+    int count;
+} commission_batch_params_t;
+
+static void commission_batch_task(void *pvParameters)
+{
+    commission_batch_params_t *params = (commission_batch_params_t *)pvParameters;
+    commissioning_add_nodes_batch(params->nodes, params->count);
+    free(params);
+    vTaskDelete(NULL);
+}
 
 // ============================================================================
 // Event Handler
@@ -69,13 +84,24 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
             s_connected = true;
             on_mqtt_connected();
 
-            // Subscribe to command topics
+            // Subscribe to per-gateway topics (MAC-specific: only THIS gateway receives these)
+            char gw_sub_buf[96];
+            snprintf(gw_sub_buf, sizeof(gw_sub_buf), "omniapi/gateway/%s/cmd/#", s_mac_topic);
+            esp_mqtt_client_subscribe(s_client, gw_sub_buf, 1);
+            snprintf(gw_sub_buf, sizeof(gw_sub_buf), "omniapi/gateway/%s/scan", s_mac_topic);
+            esp_mqtt_client_subscribe(s_client, gw_sub_buf, 1);
+            snprintf(gw_sub_buf, sizeof(gw_sub_buf), "omniapi/gateway/%s/commission", s_mac_topic);
+            esp_mqtt_client_subscribe(s_client, gw_sub_buf, 1);
+            snprintf(gw_sub_buf, sizeof(gw_sub_buf), "omniapi/gateway/%s/commission/batch", s_mac_topic);
+            esp_mqtt_client_subscribe(s_client, gw_sub_buf, 1);
+            // Also keep broadcast topics for backward compatibility with older backends
             esp_mqtt_client_subscribe(s_client, MQTT_TOPIC_CMD "/#", 1);
             esp_mqtt_client_subscribe(s_client, MQTT_TOPIC_SCAN, 1);
             esp_mqtt_client_subscribe(s_client, MQTT_TOPIC_COMMISSION, 1);
+            esp_mqtt_client_subscribe(s_client, MQTT_TOPIC_COMMISSION "/batch", 1);
             esp_mqtt_client_subscribe(s_client, MQTT_TOPIC_OTA_START, 1);
             esp_mqtt_client_subscribe(s_client, MQTT_TOPIC_OTA_ABORT, 1);
-            ESP_LOGI(TAG, "Subscribed to command topics");
+            ESP_LOGI(TAG, "Subscribed to per-gateway topics for MAC %s and broadcast fallback", s_mac_topic);
             break;
 
         case MQTT_EVENT_DISCONNECTED:
@@ -93,11 +119,26 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
             memcpy(topic, event->topic, topic_len);
             topic[topic_len] = '\0';
 
+            // Normalize per-gateway topic "omniapi/gateway/{MAC}/X" → "omniapi/gateway/X"
+            // so all existing routing handlers work unchanged for both formats
+            char gw_pfx[32];
+            snprintf(gw_pfx, sizeof(gw_pfx), "omniapi/gateway/%s/", s_mac_topic);
+            size_t gw_pfx_len = strlen(gw_pfx);
+            if (strncmp(topic, gw_pfx, gw_pfx_len) == 0) {
+                char normalized[128];
+                snprintf(normalized, sizeof(normalized), "omniapi/gateway/%s", topic + gw_pfx_len);
+                strncpy(topic, normalized, sizeof(topic) - 1);
+                topic[sizeof(topic) - 1] = '\0';
+            }
+
             ESP_LOGI(TAG, "MQTT Data: topic=%s", topic);
 
             // Route to appropriate handler
             if (strcmp(topic, MQTT_TOPIC_SCAN) == 0) {
                 handle_scan_command(event->data, event->data_len);
+            }
+            else if (strcmp(topic, MQTT_TOPIC_COMMISSION "/batch") == 0) {
+                handle_commission_batch_command(event->data, event->data_len);
             }
             else if (strcmp(topic, MQTT_TOPIC_COMMISSION) == 0) {
                 handle_commission_command(event->data, event->data_len);
@@ -159,6 +200,8 @@ esp_err_t mqtt_handler_init(void)
     uint8_t mac[6];
     esp_wifi_get_mac(WIFI_IF_STA, mac);
     snprintf(s_mac_str, sizeof(s_mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    snprintf(s_mac_topic, sizeof(s_mac_topic), "%02X%02X%02X%02X%02X%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
     // Build LWT message on same topic as status: {"online":false,"mac":"XX:XX:XX:XX:XX:XX"}
@@ -286,6 +329,65 @@ static void handle_scan_command(const char *data, int data_len)
     }
 
     cJSON_Delete(json);
+}
+
+static void handle_commission_batch_command(const char *data, int data_len)
+{
+    ESP_LOGI(TAG, "Batch commission command received");
+
+    cJSON *json = cJSON_ParseWithLength(data, data_len);
+    if (json == NULL) {
+        ESP_LOGE(TAG, "Failed to parse batch commission JSON");
+        return;
+    }
+
+    cJSON *nodes_json = cJSON_GetObjectItem(json, "nodes");
+    if (!nodes_json || !cJSON_IsArray(nodes_json)) {
+        ESP_LOGE(TAG, "Missing 'nodes' array in batch commission command");
+        cJSON_Delete(json);
+        return;
+    }
+
+    commission_batch_params_t *params = malloc(sizeof(commission_batch_params_t));
+    if (params == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate batch commission params");
+        cJSON_Delete(json);
+        return;
+    }
+    memset(params, 0, sizeof(*params));
+
+    int arr_size = cJSON_GetArraySize(nodes_json);
+    for (int i = 0; i < arr_size && params->count < MAX_BATCH_NODES; i++) {
+        cJSON *node = cJSON_GetArrayItem(nodes_json, i);
+        if (node == NULL) continue;
+        cJSON *mac_json  = cJSON_GetObjectItem(node, "mac");
+        cJSON *name_json = cJSON_GetObjectItem(node, "name");
+
+        if (!mac_json || !cJSON_IsString(mac_json)) continue;
+        if (!parse_mac_address(mac_json->valuestring, params->nodes[params->count].mac)) {
+            ESP_LOGW(TAG, "Invalid MAC in batch: %s", mac_json->valuestring);
+            continue;
+        }
+        if (name_json && cJSON_IsString(name_json)) {
+            strncpy(params->nodes[params->count].name, name_json->valuestring, 32);
+            params->nodes[params->count].name[32] = '\0';
+        }
+        params->count++;
+    }
+    cJSON_Delete(json);
+
+    if (params->count == 0) {
+        ESP_LOGW(TAG, "No valid nodes in batch commission");
+        free(params);
+        return;
+    }
+
+    ESP_LOGI(TAG, "Spawning batch commission task for %d nodes", params->count);
+    BaseType_t ret = xTaskCreate(commission_batch_task, "comm_batch", 8192, params, 5, NULL);
+    if (ret != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create batch commission task");
+        free(params);
+    }
 }
 
 static void handle_commission_command(const char *data, int data_len)
@@ -775,15 +877,15 @@ esp_err_t mqtt_publish_scan_results(const scan_result_t *results, int count)
         return ESP_FAIL;
     }
 
-    char topic[64];
-    snprintf(topic, sizeof(topic), "%s/results", MQTT_TOPIC_SCAN);
+    char topic[96];
+    snprintf(topic, sizeof(topic), "omniapi/gateway/%s/scan/results", s_mac_topic);
 
     int msg_id = esp_mqtt_client_publish(s_client, topic, json_str, 0, 1, 0);
 
     cJSON_free(json_str);
     cJSON_Delete(root);
 
-    ESP_LOGI(TAG, "Published scan results (%d nodes)", count);
+    ESP_LOGI(TAG, "Published scan results (%d nodes) to %s", count, topic);
     return (msg_id >= 0) ? ESP_OK : ESP_FAIL;
 }
 
@@ -809,8 +911,8 @@ esp_err_t mqtt_publish_commission_result(const uint8_t *mac, bool success, const
         return ESP_FAIL;
     }
 
-    char topic[64];
-    snprintf(topic, sizeof(topic), "%s/result", MQTT_TOPIC_COMMISSION);
+    char topic[96];
+    snprintf(topic, sizeof(topic), "omniapi/gateway/%s/commission/result", s_mac_topic);
 
     int msg_id = esp_mqtt_client_publish(s_client, topic, json_str, 0, 1, 0);
 
@@ -818,6 +920,48 @@ esp_err_t mqtt_publish_commission_result(const uint8_t *mac, bool success, const
     cJSON_Delete(root);
 
     ESP_LOGI(TAG, "Published commission result for %s: %s", mac_str, success ? "success" : "failed");
+    return (msg_id >= 0) ? ESP_OK : ESP_FAIL;
+}
+
+esp_err_t mqtt_publish_commission_batch_result(const batch_result_t *results, int count)
+{
+    if (!s_connected || results == NULL) return ESP_ERR_INVALID_STATE;
+
+    cJSON *root     = cJSON_CreateObject();
+    cJSON *ok_arr   = cJSON_CreateArray();
+    cJSON *fail_arr = cJSON_CreateArray();
+
+    for (int i = 0; i < count; i++) {
+        char mac_str[18];
+        snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+                 results[i].mac[0], results[i].mac[1], results[i].mac[2],
+                 results[i].mac[3], results[i].mac[4], results[i].mac[5]);
+
+        if (results[i].ok) {
+            cJSON_AddItemToArray(ok_arr, cJSON_CreateString(mac_str));
+        } else {
+            cJSON_AddItemToArray(fail_arr, cJSON_CreateString(mac_str));
+        }
+    }
+
+    cJSON_AddItemToObject(root, "ok",     ok_arr);
+    cJSON_AddItemToObject(root, "failed", fail_arr);
+
+    char *json_str = cJSON_PrintUnformatted(root);
+    if (json_str == NULL) {
+        cJSON_Delete(root);
+        return ESP_FAIL;
+    }
+
+    char topic[96];
+    snprintf(topic, sizeof(topic), "omniapi/gateway/%s/commission/batch/result", s_mac_topic);
+
+    int msg_id = esp_mqtt_client_publish(s_client, topic, json_str, 0, 1, 0);
+    ESP_LOGI(TAG, "Published batch commission result: %s", json_str);
+
+    cJSON_free(json_str);
+    cJSON_Delete(root);
+
     return (msg_id >= 0) ? ESP_OK : ESP_FAIL;
 }
 
